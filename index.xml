@@ -1,2 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReaRoll" />
+<index version="1" name="ReaRoll" commit="b781af1f7d9cd719ab821bdacb4652b4b8d52fd6">
+  <category name="ReaRoll">
+    <reapack name="ReaRoll.lua" type="script" desc="ReaRoll - compact sketching piano roll">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Testing release. Requires ReaImGui 0.10. See EULA.md before use.\par}
+}
+]]></description>
+        <link rel="website">https://forum.cockos.com/showthread.php?t=311021</link>
+      </metadata>
+      <version name="0.6.0-test" author="Davvo" time="2026-09-16T22:36:18Z">
+        <changelog><![CDATA[Initial ReaPack testing release.]]></changelog>
+        <source main="main">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/ReaRoll.lua</source>
+        <source file="src/app.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/app.lua</source>
+        <source file="src/audition.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/audition.lua</source>
+        <source file="src/cc_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/cc_cache.lua</source>
+        <source file="src/clipboard.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/clipboard.lua</source>
+        <source file="src/ghost_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ghost_cache.lua</source>
+        <source file="src/grid.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/grid.lua</source>
+        <source file="src/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/key_map.lua</source>
+        <source file="src/midi_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/midi_cache.lua</source>
+        <source file="src/midi_edit.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/midi_edit.lua</source>
+        <source file="src/music.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/music.lua</source>
+        <source file="src/selection.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/selection.lua</source>
+        <source file="src/settings.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/settings.lua</source>
+        <source file="src/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/shortcuts.lua</source>
+        <source file="src/suite_theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/suite_theme.lua</source>
+        <source file="src/take.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/take.lua</source>
+        <source file="src/theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/theme.lua</source>
+        <source file="src/transforms.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/transforms.lua</source>
+        <source file="src/util.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/util.lua</source>
+        <source file="src/viewport.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/viewport.lua</source>
+        <source file="src/ui/appearance.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/appearance.lua</source>
+        <source file="src/ui/canvas.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/canvas.lua</source>
+        <source file="src/ui/controls.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/controls.lua</source>
+        <source file="src/ui/help.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/help.lua</source>
+        <source file="src/ui/icons.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/icons.lua</source>
+        <source file="src/ui/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/key_map.lua</source>
+        <source file="src/ui/lane_tools.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/lane_tools.lua</source>
+        <source file="src/ui/phrase.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/phrase.lua</source>
+        <source file="src/ui/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/shortcuts.lua</source>
+        <source file="src/ui/sources.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/sources.lua</source>
+        <source file="src/ui/toolbar.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/toolbar.lua</source>
+        <source main="main" file="ReaRoll_Reset_Window.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/ReaRoll_Reset_Window.lua</source>
+        <source file="EULA.md">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/EULA.md</source>
+      </version>
+    </reapack>
+  </category>
+  <metadata>
+    <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 ReaRoll\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 ReaRoll is a compact piano roll for sketching MIDI ideas in REAPER. This is a testing release by Davvo.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Requirements\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaPack\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui 0.10 or newer\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Install\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab In REAPER, choose {\b Extensions > ReaPack > Import repositories}.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Import {\f1 https://raw.githubusercontent.com/davvolinni-ui/ReaRoll/main/index.xml}.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Synchronize packages, then install {\b ReaRoll}.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Run {\b ReaRoll - compact sketching piano roll} from the Action List.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The package also installs {\b ReaRoll - Reset Window} for recovering a hidden or off-screen window. ReaRoll remains a testing release until it is proven stable. Updates are delivered through ReaPack synchronization.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Support and license\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Report issues in the {\field{\*\fldinst{HYPERLINK "https://forum.cockos.com/showthread.php?t=311021"}}{\fldrslt{\ul
+ReaRoll forum thread
+}}}
+.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 ReaRoll is distributed under its {\field{\*\fldinst{HYPERLINK "ReaRoll/EULA.md"}}{\fldrslt{\ul
+End User License Agreement
+}}}
+. Public access to this repository does not grant an open-source license.\par}
+}
+]]></description>
+  </metadata>
+</index>
