@@ -1,0 +1,8 @@
+/.validation-deps/
+/dist/
+/docs/
+/tests/
+/INSTALL.txt
+/PUBLISHING.md
+__pycache__/
+*.pyc

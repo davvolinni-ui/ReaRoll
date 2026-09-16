@@ -1,0 +1,41 @@
+name: ReaPack index
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - run: sudo apt-get update && sudo apt-get install -y pandoc
+      - run: gem install reapack-index
+      - run: reapack-index --check
+
+  publish:
+    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[ci skip]')
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - run: sudo apt-get update && sudo apt-get install -y pandoc
+      - run: gem install reapack-index
+      - name: Generate and commit index
+        run: |
+          git config user.name "ReaRoll Index Bot"
+          git config user.email "actions@users.noreply.github.com"
+          reapack-index --commit
+          git push
