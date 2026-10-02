@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReaRoll" commit="b781af1f7d9cd719ab821bdacb4652b4b8d52fd6">
+<index version="1" name="ReaRoll" commit="217967778a19cc51968faf1af693017cc3c3ff2e">
   <category name="ReaRoll">
     <reapack name="ReaRoll.lua" type="script" desc="ReaRoll - compact sketching piano roll">
       <metadata>
@@ -47,6 +47,50 @@
         <source file="src/ui/toolbar.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/src/ui/toolbar.lua</source>
         <source main="main" file="ReaRoll_Reset_Window.lua">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/ReaRoll_Reset_Window.lua</source>
         <source file="EULA.md">https://github.com/davvolinni-ui/ReaRoll/raw/b781af1f7d9cd719ab821bdacb4652b4b8d52fd6/ReaRoll/EULA.md</source>
+      </version>
+      <version name="0.6.1-test" author="Davvo" time="2026-10-02T07:28:49Z">
+        <changelog><![CDATA[Add harmony tools and chord palettes.
+Expand arpeggiator and phrase editing tools.
+Preserve explicit note-on/off pairs when editing overlapping notes.
+Improve playback following, zoom focus, and timeline navigation.
+Refine controller lane tools, tooltips, toolbar, and MIDI audition controls.]]></changelog>
+        <source main="main">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/ReaRoll.lua</source>
+        <source file="src/app.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/app.lua</source>
+        <source file="src/arpeggiator.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/arpeggiator.lua</source>
+        <source file="src/audition.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/audition.lua</source>
+        <source file="src/cc_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/cc_cache.lua</source>
+        <source file="src/chord_palettes.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/chord_palettes.lua</source>
+        <source file="src/clipboard.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/clipboard.lua</source>
+        <source file="src/ghost_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ghost_cache.lua</source>
+        <source file="src/grid.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/grid.lua</source>
+        <source file="src/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/key_map.lua</source>
+        <source file="src/midi_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/midi_cache.lua</source>
+        <source file="src/midi_edit.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/midi_edit.lua</source>
+        <source file="src/music.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/music.lua</source>
+        <source file="src/note_events.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/note_events.lua</source>
+        <source file="src/selection.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/selection.lua</source>
+        <source file="src/settings.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/settings.lua</source>
+        <source file="src/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/shortcuts.lua</source>
+        <source file="src/suite_theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/suite_theme.lua</source>
+        <source file="src/take.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/take.lua</source>
+        <source file="src/theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/theme.lua</source>
+        <source file="src/transforms.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/transforms.lua</source>
+        <source file="src/util.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/util.lua</source>
+        <source file="src/viewport.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/viewport.lua</source>
+        <source file="src/ui/appearance.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/appearance.lua</source>
+        <source file="src/ui/canvas.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/canvas.lua</source>
+        <source file="src/ui/controls.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/controls.lua</source>
+        <source file="src/ui/harmony.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/harmony.lua</source>
+        <source file="src/ui/help.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/help.lua</source>
+        <source file="src/ui/icons.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/icons.lua</source>
+        <source file="src/ui/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/key_map.lua</source>
+        <source file="src/ui/lane_tools.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/lane_tools.lua</source>
+        <source file="src/ui/phrase.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/phrase.lua</source>
+        <source file="src/ui/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/shortcuts.lua</source>
+        <source file="src/ui/sources.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/sources.lua</source>
+        <source file="src/ui/toolbar.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/src/ui/toolbar.lua</source>
+        <source main="main" file="ReaRoll_Reset_Window.lua">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/ReaRoll_Reset_Window.lua</source>
+        <source file="EULA.md">https://github.com/davvolinni-ui/ReaRoll/raw/217967778a19cc51968faf1af693017cc3c3ff2e/ReaRoll/EULA.md</source>
       </version>
     </reapack>
   </category>
