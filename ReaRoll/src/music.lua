@@ -53,6 +53,24 @@ function M.snap(root,name,pitch,direction)
   end
   return pitch
 end
+local function voice(pitches,inversion)
+  inversion=math.max(0,math.min(#pitches-1,math.floor(inversion or 0)))
+  for i=1,inversion do
+    local raised=pitches[i]+12
+    local collision=true
+    while collision do
+      collision=false
+      for j,pitch in ipairs(pitches) do if j~=i and pitch==raised then raised=raised+12; collision=true; break end end
+    end
+    pitches[i]=raised
+  end
+  table.sort(pitches)
+  -- Keep intervals intact near MIDI's boundaries instead of collapsing
+  -- several chord tones onto pitch 127.
+  while pitches[#pitches]>127 do for i,p in ipairs(pitches) do pitches[i]=p-12 end end
+  while pitches[1]<0 do for i,p in ipairs(pitches) do pitches[i]=p+12 end end
+  return pitches
+end
 function M.diatonic_chord(root,name,pitch,size,inversion)
   local scale=M.scales[name] or M.scales.Major
   local snapped=M.snap(root,name,pitch)
@@ -64,10 +82,31 @@ function M.diatonic_chord(root,name,pitch,size,inversion)
     local index=degree+tone*2; local extra=math.floor((index-1)/#scale); local value=scale[(index-1)%#scale+1]
     pitches[#pitches+1]=root+(octave+extra)*12+value
   end
-  inversion=math.max(0,math.min(#pitches-1,math.floor(inversion or 0)))
-  for i=1,inversion do pitches[i]=pitches[i]+12 end
-  table.sort(pitches)
-  for i,p in ipairs(pitches) do pitches[i]=U.clamp(p,0,127) end
-  return pitches
+  return voice(pitches,inversion)
+end
+
+-- The roll and Harmony panel share the same voicing calculation.
+function M.chord_pitches(settings,root)
+  if settings.chord_diatonic then
+    return M.diatonic_chord(settings.scale_root,settings.scale_name,root,settings.chord_size,settings.chord_inversion)
+  end
+  local pitches={}
+  for _,interval in ipairs(M.chords[settings.chord_name] or M.chords.Major) do pitches[#pitches+1]=root+interval end
+  return voice(pitches,settings.chord_inversion)
+end
+
+local suffixes={Major='',Minor='m',Diminished='dim',Augmented='aug',Power='5',Sus2='sus2',Sus4='sus4',Add9='add9',
+  ['Minor add9']='m(add9)',Major6='6',Minor6='m6',['6/9']='6/9',Major7='maj7',Minor7='m7',Dominant7='7',
+  ['Minor major7']='m(maj7)',Diminished7='dim7',['Half-diminished7']='m7b5',['Dominant7 sus4']='7sus4',
+  Major9='maj9',Minor9='m9',Dominant9='9',Major11='maj11',Minor11='m11',Dominant11='11',Major13='maj13',Minor13='m13',Dominant13='13'}
+function M.chord_label(pitches,root)
+  local actual={}; for _,pitch in ipairs(pitches) do actual[(pitch-root)%12]=true end
+  for _,name in ipairs(M.chord_order) do
+    local expected={}; for _,interval in ipairs(M.chords[name]) do expected[interval%12]=true end
+    local matches=true
+    for pc=0,11 do if (actual[pc] or false)~=(expected[pc] or false) then matches=false; break end end
+    if matches then return M.roots[root%12+1]..(suffixes[name] or name) end
+  end
+  return M.roots[root%12+1]..' scale stack'
 end
 return M

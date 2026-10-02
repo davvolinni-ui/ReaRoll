@@ -39,6 +39,21 @@ function M.button(app,id,kind,tip,active)
   elseif kind=='mute' then rect(6,10,10,16); line(10,10,15,6); line(15,6,15,20); line(15,20,10,16); line(19,10,24,16); line(24,10,19,16)
   elseif kind=='play' then line(9,6,21,13); line(21,13,9,20); line(9,20,9,6)
   elseif kind=='pause' then rect(8,7,11,19); rect(17,7,20,19)
+  elseif kind=='follow_off' or kind=='follow_page' or kind=='follow_continuous' or kind=='follow_suspended' then
+    -- A timeline frame and playhead tie all Follow states together.
+    line(5,5,23,5); line(5,21,23,21)
+    if kind=='follow_off' then
+      line(14,8,14,18); line(6,20,22,6)
+    elseif kind=='follow_page' then
+      line(21,8,21,18)
+      line(6,13,17,13); line(13,9,17,13); line(17,13,13,17)
+    elseif kind=='follow_continuous' then
+      line(14,7,14,19)
+      line(5,13,10,13); line(5,13,8,10); line(5,13,8,16)
+      line(18,13,23,13); line(23,13,20,10); line(23,13,20,16)
+    else
+      line(10,9,10,17); line(18,9,18,17)
+    end
   elseif kind=='snap_absolute' then
     -- Independent strokes avoid compound-path join artifacts at toolbar scale.
     line(7,12,7,17); line(7,17,10,20); line(10,20,14,21.5); line(14,21.5,18,20); line(18,20,21,17); line(21,17,21,12)

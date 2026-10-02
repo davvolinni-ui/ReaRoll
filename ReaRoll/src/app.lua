@@ -38,7 +38,7 @@ function App.new(ImGui)
   local self=setmetatable({},App)
   self.ImGui=ImGui; self.ctx=ImGui.CreateContext('ReaRoll'); self.open=true
   self.settings=Settings.load(); Shortcuts.load(self.settings); self.theme=Theme; self.music=Music; self.transforms=Transforms; self.clipboard=Clipboard; self.cache=Cache.new(); self.cc_cache=CCCache.new(); self.ghost=GhostCache.new(); self.selection=Selection.new()
-  self.viewport=Viewport.new(self.settings); self.edit=Edit.new(self.cache,self.selection,self.cc_cache); self.edit.app=self; self.audition=Audition.new()
+  self.viewport=Viewport.new(self.settings); self.edit=Edit.new(self.cache,self.selection,self.cc_cache); self.edit.app=self; self.audition=Audition.new(self.settings)
   Appearance.init(self)
   self.take=nil; self.take_name='No MIDI take selected'; self.next_take_poll=0; self.gesture=nil; self.shut_down=false
   self.arrange_selected_items={}
@@ -242,6 +242,21 @@ function App:zoom_time(factor,mx)
   -- while buttons and shortcuts pass the centre of the grid.
   self.viewport:zoom_time(factor,mx)
 end
+function App:zoom_bar(factor)
+  local v,s=self.viewport,self.settings
+  if not v.w then return end
+  local cursor=reaper.TimeMap2_timeToQN(0,reaper.GetCursorPosition())
+  local focus=self.bar_zoom_focus
+  if not focus or focus.take~=self.take or math.abs(focus.cursor-cursor)>1e-9
+    or math.abs(focus.last_start-s.start_qn)>1e-9 or math.abs(focus.last_visible-s.visible_qn)>1e-9 then
+    -- An off-screen edit cursor must not yank the user to another phrase.
+    local qn=math.max(s.start_qn,math.min(s.start_qn+s.visible_qn,cursor))
+    focus={take=self.take,cursor=cursor,qn=qn,ratio=(qn-s.start_qn)/s.visible_qn}
+    self.bar_zoom_focus=focus
+  end
+  v:zoom_time_at(factor,focus.qn,focus.ratio)
+  focus.last_start=s.start_qn; focus.last_visible=s.visible_qn
+end
 function App:flush_property_wheel(force)
   local state=self.property_wheel; if not state or not force and reaper.time_precise()<state.deadline then return false end
   self.edit:finish(); self.cache:rebuild(); self.cc_cache:rebuild(); if state.wanted then self:reselect_notes(state.wanted) end; self.property_wheel=nil; return true
@@ -253,7 +268,16 @@ function App:shutdown()
   self:flush_property_wheel(true); self.audition:stop(); if self.edit.active then self.edit:finish() end; Settings.save(self.settings); Shortcuts.save(self.settings)
 end
 function App:frame()
-  self:poll_take(); local I,c,T=self.ImGui,self.ctx,self.theme
+  local I,c=self.ImGui,self.ctx
+  if I.GetFrameCount then
+    local frame=I.GetFrameCount(c)
+    if self.last_ui_frame==frame then
+      if self.open then reaper.defer(function()self:frame()end) else self:shutdown() end
+      return
+    end
+    self.last_ui_frame=frame
+  end
+  self:poll_take(); local T=self.theme
   self:flush_property_wheel(false)
   local ui_scale=math.max(.8,math.min(1.5,self.settings.ui_scale or 1))
   local rescue=reaper.GetExtState('ReaRoll','window_rescue')=='1'
@@ -290,16 +314,17 @@ function App:frame()
       -- The piano-roll workspace owns its complete geometry. Child padding
       -- otherwise leaves an inherited empty strip below the bottom toolbar.
       I.PushStyleVar(c,I.StyleVar_WindowPadding,0,0)
-      draw_child(I,c,'##piano_roll_workspace',canvas_width,height,function() Canvas.draw(self) end)
+      draw_child(I,c,'##piano_roll_workspace',canvas_width,height,function() Canvas.draw(self) end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
       I.PopStyleVar(c)
     elseif self.empty_track then
       local width,height=I.GetContentRegionAvail(c); I.PushStyleVar(c,I.StyleVar_WindowPadding,0,0)
-      draw_child(I,c,'##empty_piano_roll_workspace',width,height,function() Canvas.draw_empty(self,self.empty_track) end)
+      draw_child(I,c,'##empty_piano_roll_workspace',width,height,function() Canvas.draw_empty(self,self.empty_track) end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
       I.PopStyleVar(c)
     else I.Dummy(c,1,70); I.TextDisabled(c,'Select a track or MIDI item to start sketching.'); I.TextDisabled(c,'On an empty selected track, click the grid to create a MIDI item using the configured bar length.') end
   end
   if visible then I.End(c) end
   Toolbar.draw_chord_palette(self); KeyMapUI.draw(self); Appearance.draw(self); Help.draw(self); ShortcutUI.draw(self); if font_pushed then I.PopFont(c) end; I.PopStyleVar(c,5); I.PopStyleColor(c,18)
+  self.edit:flush()
   if self.open then reaper.defer(function() self:frame() end) else self:shutdown() end
 end
 return App

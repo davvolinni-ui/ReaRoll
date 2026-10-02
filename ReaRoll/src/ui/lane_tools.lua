@@ -1,9 +1,11 @@
 -- @noindex
 local U=require 'src.util'
 local Selection=require 'src.selection'
+local Notes=require 'src.note_events'
 local Controls=require 'src.ui.controls'
+local Music=require 'src.music'
 local M={}
-local popup_names={'##lane_quantize','##lane_legato','##lane_humanize','##lane_strum_flam','##lane_arp','##lane_pitch','##lane_velocity','##lane_shape_popup','##lane_more'}
+local popup_names={'##lane_quantize','##lane_scale_quantize','##lane_legato','##lane_humanize','##lane_strum_flam','##lane_arp','##lane_pitch','##lane_velocity','##lane_shape_popup','##lane_more'}
 
 function M.any_popup_open(app)
   local I,c=app.ImGui,app.ctx
@@ -25,9 +27,35 @@ end
 
 function M.height(app)
   local I,c=app.ImGui,app.ctx
-  -- This row uses SmallButton, whose vertical frame padding is zero in
-  -- Dear ImGui. Reserving GetFrameHeight left normal-button padding below it.
-  return I.GetTextLineHeight and I.GetTextLineHeight(c) or 14
+  -- Reserve the padded button row, including its bottom breathing room.
+  return (I.GetFrameHeight and I.GetFrameHeight(c) or 24)+4
+end
+
+local function popup_header(app,title,detail)
+  local I,c,T=app.ImGui,app.ctx,app.theme
+  I.TextColored(c,T.accent,title)
+  I.Spacing(c); I.TextWrapped(c,detail)
+  local count=app.transform_preview and #app.transform_preview.originals or Selection.count(app.selection)
+  I.TextDisabled(c,count>0 and ('LIVE PREVIEW  /  '..count..' selected notes') or 'Select notes to preview this tool.')
+  I.Separator(c); I.Spacing(c)
+end
+
+local function preview_footer(app)
+  local I,c,T=app.ImGui,app.ctx,app.theme
+  I.Spacing(c); I.Separator(c); I.Spacing(c)
+  I.BeginDisabled(c,not app.transform_preview or app.transform_preview.invalid)
+  I.PushStyleColor(c,I.Col_Button,T.accent)
+  if I.Button(c,'Apply',120,0) then app.transforms.commit_preview(app); app.lane_phrase_preview=nil; I.CloseCurrentPopup(c) end
+  I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
+  if I.Button(c,'Cancel',100,0) then app.transforms.cancel_preview(app); app.lane_phrase_preview=nil; I.CloseCurrentPopup(c) end
+end
+
+local function option_card(app,id,label,selected)
+  local I,c,T=app.ImGui,app.ctx,app.theme
+  I.PushStyleColor(c,I.Col_Button,selected and T.beat or T.panel2)
+  local hit=I.Button(c,label..'##'..id,0,30)
+  I.PopStyleColor(c)
+  return hit
 end
 
 local function matching_event(def,e,channel)
@@ -124,16 +152,18 @@ end
 M.calculated=calculated
 
 local function write_values(app,def,values,items)
+  if def.note then app.edit:begin_preview(app.take) end
   for _,item in ipairs(items) do local index,value=item.index,values[item.index]
     if item.insert then
       local msg2,msg3
       if def.pitch then msg2,msg3=value&0x7F,(value>>7)&0x7F elseif def.status==0xD0 or def.status==0xC0 then msg2,msg3=value,0 else msg2,msg3=def.cc,value end
       reaper.MIDI_InsertCC(app.take,true,false,item.ppq,def.status,app.settings.channel or 0,msg2,msg3,true)
-    elseif def.note then reaper.MIDI_SetNote(app.take,index,nil,nil,nil,nil,nil,nil,value,true)
+    elseif def.note then app.edit:set(index,app.take,nil,nil,nil,value)
     elseif def.pitch then reaper.MIDI_SetCC(app.take,index,nil,nil,nil,nil,nil,value&0x7F,(value>>7)&0x7F,true)
     elseif def.status==0xD0 or def.status==0xC0 then reaper.MIDI_SetCC(app.take,index,nil,nil,nil,nil,nil,value,0,true)
     else reaper.MIDI_SetCC(app.take,index,nil,nil,nil,nil,nil,nil,value,true) end
   end
+  if def.note then app.edit:finish() end
 end
 
 local function delete_replaced_events(app,indices)
@@ -143,7 +173,7 @@ end
 
 local function restore(app)
   local p=app.lane_tool_preview; if not p then return false end
-  if p.take and reaper.ValidatePtr2(0,p.take,'MediaItem_Take*') then reaper.MIDI_SetAllEvts(p.take,p.raw); reaper.MIDI_Sort(p.take) end
+  if p.take and reaper.ValidatePtr2(0,p.take,'MediaItem_Take*') then reaper.MIDI_SetAllEvts(p.take,p.raw); reaper.MIDI_Sort(p.take); Notes.set_pairing_state(p.take,p.pairing_state) end
   app.cache:invalidate(); app.cache:rebuild(); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange()
   return true
 end
@@ -193,7 +223,7 @@ local function preview(app,def,mode,options)
     local ok,raw=reaper.MIDI_GetAllEvts(app.take,''); if not ok then return false end
     local items,deletes=collect(app,def,resolution); if #items==0 then app.transform_notice='No events are available for Shape in the current target.'; return false end
     reaper.Undo_BeginBlock2(0)
-    app.lane_tool_preview={take=app.take,raw=raw,signature=signature,resolution=resolution,items=items,deletes=deletes,def=def,mode=mode,undo_open=true}
+    app.lane_tool_preview={take=app.take,raw=raw,pairing_state=Notes.get_pairing_state(app.take),signature=signature,resolution=resolution,items=items,deletes=deletes,def=def,mode=mode,undo_open=true}
   end
   if mode=='lfo' and options.sync_qn then
     local origin=app.item_start_qn or 0; options._sync_origin_ppq=reaper.MIDI_GetPPQPosFromProjQN(app.take,origin)
@@ -230,7 +260,8 @@ end
 
 local function shape_popup(app,def)
   local I,c=app.ImGui,app.ctx; local o=defaults(app,def); local changed=false
-  I.Text(c,'Editing: '..def.label..'  ·  Channel '..tostring((app.settings.channel or 0)+1)); I.Separator(c)
+  I.TextColored(c,app.theme.accent,'Shape / '..def.label)
+  I.Spacing(c); I.TextDisabled(c,'LIVE PREVIEW  /  Channel '..tostring((app.settings.channel or 0)+1)); I.Separator(c)
   if def.protected then I.TextWrapped(c,'This MIDI message type is protected from generated automation. Choose Velocity, Pitch Bend, Pressure, or a normal CC lane.'); if I.Button(c,'Close') then I.CloseCurrentPopup(c) end; return end
   local scope=automatic_scope(app)
   I.TextDisabled(c,scope=='range' and 'Target: selected range' or scope=='notes' and 'Target: selected notes' or 'Target: entire MIDI item')
@@ -285,9 +316,12 @@ local function shape_popup(app,def)
     for i=0,48 do local t=i/48; local position=(o._sync_origin_ppq or 0)+t*(o._sync_ppq or 1)*2; local value=shaped_value(o.mode,o,t,1,1,position); local px=x1+3+t*(x2-x1-6); local py=y2-3-(value-def.minimum)/math.max(1,def.maximum-def.minimum)*(y2-y1-6); if lastx then I.DrawList_AddLine(d,lastx,lasty,px,py,app.theme.velocity or app.theme.accent,2) end; lastx,lasty=px,py end
     if I.IsItemHovered(c) then I.SetTooltip(c,'Preview of the value shape. LFO rate is synchronized in musical quarter-note time and anchored to the MIDI item start.') end
   end
-  if changed then preview(app,def,o.mode,o) end
-  I.Separator(c); if I.Button(c,'Apply') then M.apply(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then M.cancel(app); I.CloseCurrentPopup(c) end
-  if not app.lane_tool_preview then I.SameLine(c); if I.SmallButton(c,'Preview') then preview(app,def,o.mode,o) end end
+  if changed or not app.lane_tool_preview then preview(app,def,o.mode,o) end
+  I.Spacing(c); I.Separator(c); I.Spacing(c)
+  I.BeginDisabled(c,not app.lane_tool_preview); I.PushStyleColor(c,I.Col_Button,app.theme.accent)
+  if I.Button(c,'Apply',120,0) then M.apply(app); I.CloseCurrentPopup(c) end
+  I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
+  if I.Button(c,'Cancel',100,0) then M.cancel(app); I.CloseCurrentPopup(c) end
 end
 
 local function prepare_note_tool(app)
@@ -297,26 +331,68 @@ end
 
 local function tool_button(app,label,id,tip,popup)
   local I,c=app.ImGui,app.ctx
-  if I.SmallButton(c,label..'##lane_tool_'..id) then prepare_note_tool(app); I.OpenPopup(c,popup) end
+  local active=I.IsPopupOpen and I.IsPopupOpen(c,popup)
+  I.PushStyleColor(c,I.Col_Button,active and app.theme.beat or app.theme.panel2)
+  I.PushStyleColor(c,I.Col_Border,active and app.theme.accent or app.theme.grid)
+  if I.Button(c,label..'##lane_tool_'..id) then prepare_note_tool(app); I.OpenPopup(c,popup) end
+  I.PopStyleColor(c,2)
   if I.IsItemHovered(c) then I.SetTooltip(c,tip) end
 end
 
 local function note_tool_popups(app)
   local I,c,s=app.ImGui,app.ctx,app.settings
-  if I.BeginPopup(c,'##lane_quantize') then
+  I.PushStyleVar(c,I.StyleVar_WindowPadding,16,14)
+  I.PushStyleVar(c,I.StyleVar_ItemSpacing,8,8)
+  I.PushStyleVar(c,I.StyleVar_FrameRounding,5)
+  I.PushStyleVar(c,I.StyleVar_FrameBorderSize,1)
+  local function begin_popup(name)
+    I.SetNextWindowSize(c,420,0,I.Cond_Appearing)
+    if name=='##lane_arp' and I.SetNextWindowSizeConstraints then I.SetNextWindowSizeConstraints(c,420,0,560,600) end
+    return I.BeginPopup(c,name,name=='##lane_arp' and I.WindowFlags_NoScrollWithMouse or 0)
+  end
+  if begin_popup('##lane_scale_quantize') then
+    popup_header(app,'Scale quantize','Move existing notes into Harmony\'s key and scale without changing their timing.')
+    local changed=false
+    I.SetNextItemWidth(c,110)
+    if I.BeginCombo(c,'Key',Music.roots[s.scale_root+1]) then
+      for pc=0,11 do if I.Selectable(c,Music.roots[pc+1],s.scale_root==pc) then s.scale_root=pc; changed=true end end
+      I.EndCombo(c)
+    end
+    I.SetNextItemWidth(c,260)
+    if I.BeginCombo(c,'Scale',s.scale_name) then
+      for _,group in ipairs(Music.scale_groups) do
+        I.TextDisabled(c,group[1])
+        for _,name in ipairs(group[2]) do if I.Selectable(c,name,s.scale_name==name) then s.scale_name=name; changed=true end end
+      end
+      I.EndCombo(c)
+    end
+    app.lane_scale_direction=app.lane_scale_direction or 0
+    I.Spacing(c)
+    for index,entry in ipairs({{'Nearest',0},{'Down',-1},{'Up',1}}) do
+      if index>1 then I.SameLine(c) end
+      if option_card(app,'scale_direction'..index,entry[1],app.lane_scale_direction==entry[2]) then app.lane_scale_direction=entry[2]; changed=true end
+    end
+    I.TextDisabled(c,'In-scale notes stay put. Nearest breaks ties upward.')
+    if changed or not app.transform_preview then app.transforms.preview_scale_quantize(app,app.lane_scale_direction) end
+    preview_footer(app); I.EndPopup(c)
+  end
+  if begin_popup('##lane_quantize') then
     if app.lane_quantize_ends==nil then app.lane_quantize_ends=false end; app.lane_quantize_step=app.lane_quantize_step or s.grid_qn; app.lane_quantize_strength=app.lane_quantize_strength or 100
-    I.Text(c,'Quantize'); I.Separator(c); local changed=false
+    popup_header(app,'Timing quantize','Tighten note starts to the grid. Adjust strength for a lighter touch.'); local changed=false
     local labels={[1]='1/4',[.5]='1/8',[.25]='1/16',[.125]='1/32',[.0625]='1/64'}
-    if I.BeginCombo(c,'Grid',labels[app.lane_quantize_step] or 'Current') then for _,step in ipairs({1,.5,.25,.125,.0625}) do if I.Selectable(c,labels[step],app.lane_quantize_step==step) then app.lane_quantize_step=step; changed=true end end; I.EndCombo(c) end
+    for index,step in ipairs({1,.5,.25,.125,.0625}) do
+      if index>1 then I.SameLine(c) end
+      if option_card(app,'quantize_grid'..index,labels[step],app.lane_quantize_step==step) then app.lane_quantize_step=step; changed=true end
+    end
     changed=Controls.choice(app,app,'lane_quantize_step',s.grid_qn,{1,.5,.25,.125,.0625},'Quantize grid') or changed
     local hit; hit,app.lane_quantize_strength=I.SliderInt(c,'Strength',app.lane_quantize_strength,0,100,'%d%%'); changed=Controls.number(app,app,'lane_quantize_strength',100,5,0,100,'Quantize strength') or hit or changed
     hit,app.lane_quantize_ends=I.Checkbox(c,'Quantize note ends',app.lane_quantize_ends); changed=Controls.toggle(app,app,'lane_quantize_ends',false,'Quantize note ends') or hit or changed
-    if changed then app.transforms.preview_quantize(app,app.lane_quantize_ends,app.lane_quantize_step,app.lane_quantize_strength) end
-    I.BeginDisabled(c,Selection.count(app.selection)==0); if app.transform_preview then if I.Button(c,'Apply') then app.transforms.commit_preview(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); I.CloseCurrentPopup(c) end else if I.Button(c,'Preview') then app.transforms.preview_quantize(app,app.lane_quantize_ends,app.lane_quantize_step,app.lane_quantize_strength) end end; I.EndDisabled(c); I.EndPopup(c)
+    if changed or not app.transform_preview then app.transforms.preview_quantize(app,app.lane_quantize_ends,app.lane_quantize_step,app.lane_quantize_strength) end
+    preview_footer(app); I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_legato') then
+  if begin_popup('##lane_legato') then
     app.legato_release_qn=app.legato_release_qn or 0; app.legato_target=app.legato_target or 'same_pitch'
-    I.Text(c,'Legato'); I.Separator(c); local changed=false
+    popup_header(app,'Legato','Connect notes smoothly, with an optional release gap.'); local changed=false
     if I.BeginCombo(c,'Connect',app.legato_target=='next_onset' and 'Next selected onset (chords)' or 'Next note of same pitch') then
       if I.Selectable(c,'Next note of same pitch',app.legato_target=='same_pitch') then app.legato_target='same_pitch'; changed=true end
       if I.Selectable(c,'Next selected onset (chords)',app.legato_target=='next_onset') then app.legato_target='next_onset'; changed=true end
@@ -327,22 +403,22 @@ local function note_tool_popups(app)
     local hit; hit,app.legato_release_qn=I.SliderDouble(c,'Release gap',app.legato_release_qn,0,.25,'%.3f QN'); changed=Controls.number(app,app,'legato_release_qn',0,.01,0,.25,'Legato release gap') or hit or changed
     if I.IsItemHovered(c) then I.SetTooltip(c,'Zero makes notes touch. Increase this to leave a short release gap before the next onset.') end
     local all_pitches=app.legato_target=='next_onset'
-    if changed then app.transforms.preview_legato(app,-app.legato_release_qn,all_pitches) end
-    I.BeginDisabled(c,Selection.count(app.selection)==0); if app.transform_preview then if I.Button(c,'Apply') then app.transforms.commit_preview(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); I.CloseCurrentPopup(c) end else if I.Button(c,'Preview') then app.transforms.preview_legato(app,-app.legato_release_qn,all_pitches) end end; I.EndDisabled(c); I.EndPopup(c)
+    if changed or not app.transform_preview then app.transforms.preview_legato(app,-app.legato_release_qn,all_pitches) end
+    preview_footer(app); I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_humanize') then
+  if begin_popup('##lane_humanize') then
     app.human_timing_bias=app.human_timing_bias or 0; if app.human_preserve_chords==nil then app.human_preserve_chords=true end
-    I.Text(c,'Humanize'); I.Separator(c); local changed=false; local hit
+    popup_header(app,'Humanize','Add controlled timing and velocity variation.'); local changed=false; local hit
     hit,s.human_time=I.SliderInt(c,'Timing',s.human_time,0,50,'%d%% grid'); changed=Controls.number(app,s,'human_time',8,1,0,50,'Humanize timing') or hit or changed
     hit,s.human_velocity=I.SliderInt(c,'Velocity',s.human_velocity,0,40,'+/- %d'); changed=Controls.number(app,s,'human_velocity',6,1,0,40,'Humanize velocity') or hit or changed
     hit,app.human_timing_bias=I.SliderInt(c,'Timing bias',app.human_timing_bias,-100,100,'%+d%%'); changed=Controls.number(app,app,'human_timing_bias',0,5,-100,100,'Humanize timing bias') or hit or changed
     hit,app.human_preserve_chords=I.Checkbox(c,'Keep chord notes together',app.human_preserve_chords); changed=Controls.toggle(app,app,'human_preserve_chords',true,'Preserve chord timing') or hit or changed
-    if changed then app.transforms.preview_humanize(app,s.human_time,s.human_velocity,app.human_timing_bias,app.human_preserve_chords) end
-    I.BeginDisabled(c,Selection.count(app.selection)==0); if app.transform_preview then if I.Button(c,'Apply') then app.transforms.commit_preview(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); I.CloseCurrentPopup(c) end else if I.Button(c,'Preview') then app.transforms.preview_humanize(app,s.human_time,s.human_velocity,app.human_timing_bias,app.human_preserve_chords) end end; I.EndDisabled(c); I.EndPopup(c)
+    if changed or not app.transform_preview then app.transforms.preview_humanize(app,s.human_time,s.human_velocity,app.human_timing_bias,app.human_preserve_chords) end
+    preview_footer(app); I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_strum_flam') then
+  if begin_popup('##lane_strum_flam') then
     app.performance_preview=app.performance_preview or 'strum'; app.strum_direction=app.strum_direction or 1
-    I.Text(c,'Strum / Flam'); I.Separator(c); local changed=false
+    popup_header(app,'Strum / Flam','Spread chord attacks or add a second hit.'); local changed=false
     if I.RadioButton(c,'Strum',app.performance_preview=='strum') then app.transforms.cancel_preview(app); app.performance_preview='strum'; changed=true end
     I.SameLine(c); if I.RadioButton(c,'Flam',app.performance_preview=='flam') then app.transforms.cancel_preview(app); app.performance_preview='flam'; changed=true end
     if app.performance_preview=='strum' then
@@ -350,42 +426,118 @@ local function note_tool_popups(app)
       if I.RadioButton(c,'High to low',app.strum_direction<0) then app.strum_direction=-1; changed=true end
       local hit; hit,s.strum_qn=I.SliderDouble(c,'Spacing',s.strum_qn,0,.20,'%.3f QN'); changed=Controls.number(app,s,'strum_qn',.03,.005,0,.20,'Strum spacing') or hit or changed
     else local hit; hit,s.flam_qn=I.SliderDouble(c,'Delay',s.flam_qn,.005,.20,'%.3f QN'); changed=Controls.number(app,s,'flam_qn',.04,.005,.005,.20,'Flam delay') or hit or changed end
-    if changed then if app.performance_preview=='strum' then app.transforms.preview_strum(app,app.strum_direction) else app.transforms.preview_flam(app) end; app.lane_phrase_preview=true end
-    if not app.transform_preview then if I.Button(c,'Preview') then if app.performance_preview=='strum' then app.transforms.preview_strum(app,app.strum_direction) else app.transforms.preview_flam(app) end; app.lane_phrase_preview=true end
-    else if I.Button(c,'Apply') then app.transforms.commit_preview(app); app.lane_phrase_preview=nil; I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); app.lane_phrase_preview=nil; I.CloseCurrentPopup(c) end end
+    if changed or not app.transform_preview then if app.performance_preview=='strum' then app.transforms.preview_strum(app,app.strum_direction) else app.transforms.preview_flam(app) end; app.lane_phrase_preview=true end
+    preview_footer(app)
     I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_arp') then
+  if begin_popup('##lane_arp') then
+    app.control_wheel_consumed=false
+    local Arp=require 'src.arpeggiator'
     app.arp_direction=app.arp_direction or 'up'; app.arp_gate=app.arp_gate or .85; app.arp_octaves=app.arp_octaves or 1; app.arp_swing=app.arp_swing or 0
-    I.Text(c,'Arpeggiator'); I.Separator(c)
+    app.arp_rhythm=app.arp_rhythm or '11111111'; app.arp_accent=app.arp_accent or 0
+    if app.arp_restart==nil then app.arp_restart=true end
+    popup_header(app,'Arpeggiator','Follow your chords. Find a groove. Shape the movement.')
     local changed=false
-    if I.BeginCombo(c,'Direction',app.arp_direction) then for _,name in ipairs({'up','down','updown'}) do if I.Selectable(c,name,app.arp_direction==name) then app.arp_direction=name; changed=true end end; I.EndCombo(c) end
-    changed=Controls.choice(app,app,'arp_direction','up',{'up','down','updown'},'Arpeggiator direction') or changed
-    local hit; hit,app.arp_gate=I.SliderDouble(c,'Gate',app.arp_gate,.1,1,'%.2f'); changed=Controls.number(app,app,'arp_gate',.85,.02,.1,1,'Arpeggiator gate') or hit or changed
-    hit,app.arp_octaves=I.SliderInt(c,'Octaves',app.arp_octaves,1,4,'%d'); changed=Controls.number(app,app,'arp_octaves',1,1,1,4,'Arpeggiator octaves') or hit or changed
-    hit,app.arp_swing=I.SliderDouble(c,'Swing',app.arp_swing,0,.75,'%.2f'); changed=Controls.number(app,app,'arp_swing',0,.02,0,.75,'Arpeggiator swing') or hit or changed
-    if changed then app.transforms.preview_arpeggiate(app,app.arp_direction,app.arp_gate,app.arp_octaves,app.arp_swing) end
-    I.BeginDisabled(c,Selection.count(app.selection)==0); if app.transform_preview then if I.Button(c,'Apply') then app.transforms.commit_preview(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); I.CloseCurrentPopup(c) end else if I.Button(c,'Preview') then app.transforms.preview_arpeggiate(app,app.arp_direction,app.arp_gate,app.arp_octaves,app.arp_swing) end end; I.EndDisabled(c); I.EndPopup(c)
+    local preset_names={}; for _,preset in ipairs(Arp.presets) do preset_names[#preset_names+1]=preset.name end
+    local function load_preset(name)
+      for _,preset in ipairs(Arp.presets) do if preset.name==name then
+        app.arp_preset=preset.name; app.arp_direction=preset.pattern; app.arp_rate=preset.rate
+        app.arp_gate=preset.gate; app.arp_octaves=preset.octaves; app.arp_swing=preset.swing
+        app.arp_rhythm=preset.rhythm; app.arp_accent=preset.accent; return
+      end end
+    end
+    local preset_open=I.BeginCombo(c,'Starting point',app.arp_preset or 'Custom')
+    if not preset_open and Controls.choice(app,app,'arp_preset',preset_names[1],preset_names,'Starting point') then load_preset(app.arp_preset); changed=true end
+    if preset_open then
+      for _,preset in ipairs(Arp.presets) do
+        if I.Selectable(c,preset.name,app.arp_preset==preset.name) then
+          app.arp_preset=preset.name; app.arp_direction=preset.pattern; app.arp_rate=preset.rate
+          app.arp_gate=preset.gate; app.arp_octaves=preset.octaves; app.arp_swing=preset.swing
+          app.arp_rhythm=preset.rhythm; app.arp_accent=preset.accent; changed=true
+        end
+      end
+      I.EndCombo(c)
+    end
+    I.Spacing(c); I.TextColored(c,app.theme.accent,'MOVEMENT')
+    local labels={'Rise','Fall','Bounce up','Bounce down','Outside in','Inside out','Random'}
+    for i,name in ipairs(Arp.patterns) do
+      if i%3~=1 then I.SameLine(c) end
+      if option_card(app,'arp_pattern_'..name,labels[i],app.arp_direction==name) then app.arp_direction=name; changed=true end
+    end
+    local hit; hit,app.arp_octaves=I.SliderInt(c,'Octave range',app.arp_octaves,1,4,'%d'); changed=Controls.number(app,app,'arp_octaves',1,1,1,4,'Octave range') or hit or changed
+    hit,app.arp_restart=I.Checkbox(c,'Restart pattern when chord changes',app.arp_restart); changed=hit or changed
+    I.Spacing(c); I.Separator(c); I.Spacing(c); I.TextColored(c,app.theme.accent,'GROOVE')
+    local rates={{'Grid',0},{'1/8',.5},{'1/16',.25},{'1/32',.125},{'1/8 triplet',1/3},{'1/16 triplet',1/6}}
+    app.arp_rate=app.arp_rate or 0
+    for i,entry in ipairs(rates) do
+      if i%3~=1 then I.SameLine(c) end
+      if option_card(app,'arp_rate_'..i,entry[1],(app.arp_rate or 0)==entry[2]) then app.arp_rate=entry[2]; changed=true end
+    end
+    local rhythm_name='Straight'; for _,entry in ipairs(Arp.rhythms) do if entry[2]==app.arp_rhythm then rhythm_name=entry[1] end end
+    local rhythm_open=I.BeginCombo(c,'Rhythm',rhythm_name)
+    if not rhythm_open then changed=Controls.choice(app,app,'arp_rhythm','11111111',{'11111111','01010101','10010010','10111010','11010110'},'Rhythm') or changed end
+    if rhythm_open then
+      for _,entry in ipairs(Arp.rhythms) do if I.Selectable(c,entry[1],app.arp_rhythm==entry[2]) then app.arp_rhythm=entry[2]; changed=true end end
+      I.EndCombo(c)
+    end
+    for i=1,8 do
+      if i>1 then I.SameLine(c) end
+      local on=app.arp_rhythm:sub(i,i)=='1'
+      if option_card(app,'arp_step_'..i,on and tostring(i) or '-',on) then app.arp_rhythm=app.arp_rhythm:sub(1,i-1)..(on and '0' or '1')..app.arp_rhythm:sub(i+1); changed=true end
+    end
+    I.TextDisabled(c,'Tap steps to add rests. Accent lands every four steps.')
+    hit,app.arp_gate=I.SliderDouble(c,'Note length',app.arp_gate,.1,1,'%.2f'); changed=Controls.number(app,app,'arp_gate',.85,.02,.1,1,'Note length') or hit or changed
+    hit,app.arp_swing=I.SliderDouble(c,'Swing',app.arp_swing,0,.75,'%.2f'); changed=Controls.number(app,app,'arp_swing',0,.02,0,.75,'Swing') or hit or changed
+    hit,app.arp_accent=I.SliderInt(c,'Accent',app.arp_accent,0,40,'%d'); changed=Controls.number(app,app,'arp_accent',0,1,0,40,'Accent') or hit or changed
+    if app.arp_direction=='random' and I.Button(c,'New variation') then app.arp_seed=(app.arp_seed or 1)+1; changed=true end
+    if changed or not app.transform_preview then
+      app.transforms.preview_arpeggiate(app,app.arp_direction,app.arp_gate,app.arp_octaves,app.arp_swing,{rate=(app.arp_rate and app.arp_rate>0) and app.arp_rate or s.grid_qn,rhythm=app.arp_rhythm,accent=app.arp_accent,restart=app.arp_restart,seed=app.arp_seed or 1})
+    end
+    if app.transform_notice then I.TextWrapped(c,app.transform_notice) end
+    if app.transform_preview and app.transform_preview.kind=='arp' then I.TextDisabled(c,tostring(app.transform_preview.generated_count or 0)..' notes in preview') end
+    preview_footer(app)
+    -- Native window scrolling runs before widgets claim the wheel. Route it
+    -- here instead, after settings have had the opportunity to consume it.
+    if not app.control_wheel_consumed and I.IsWindowHovered(c) and not I.IsAnyItemActive(c) then
+      local wheel=I.GetMouseWheel(c)
+      if wheel~=0 then I.SetScrollY(c,math.max(0,I.GetScrollY(c)-wheel*I.GetTextLineHeight(c)*3)) end
+    end
+    I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_velocity') then
+  if begin_popup('##lane_velocity') then
     app.velocity_tool_mode=app.velocity_tool_mode or 'ramp'; app.velocity_set=app.velocity_set or 100; app.velocity_scale=app.velocity_scale or 1; app.velocity_pivot=app.velocity_pivot or 96; app.velocity_first=app.velocity_first or 60; app.velocity_last=app.velocity_last or 110
-    I.Text(c,'Velocity'); I.Separator(c); local changed=false
+    popup_header(app,'Velocity','Shape the dynamics of your selected notes.'); local changed=false
     for i,entry in ipairs({{'Set','set'},{'Ramp','ramp'},{'Compress / Expand','scale'}}) do if i>1 then I.SameLine(c) end; if I.RadioButton(c,entry[1]..'##velocity_mode_'..entry[2],app.velocity_tool_mode==entry[2]) then app.velocity_tool_mode=entry[2]; changed=true end end
     local hit
     if app.velocity_tool_mode=='set' then hit,app.velocity_set=I.SliderInt(c,'Level',app.velocity_set,1,127); changed=Controls.number(app,app,'velocity_set',100,1,1,127,'Velocity level') or hit or changed
     elseif app.velocity_tool_mode=='ramp' then hit,app.velocity_first=I.SliderInt(c,'Start',app.velocity_first,1,127); changed=Controls.number(app,app,'velocity_first',60,1,1,127,'Ramp start') or hit or changed; hit,app.velocity_last=I.SliderInt(c,'End',app.velocity_last,1,127); changed=Controls.number(app,app,'velocity_last',110,1,1,127,'Ramp end') or hit or changed
     else hit,app.velocity_scale=I.SliderDouble(c,'Amount',app.velocity_scale,0,2,'%.2fx'); changed=Controls.number(app,app,'velocity_scale',1,.05,0,2,'Velocity compression or expansion') or hit or changed; hit,app.velocity_pivot=I.SliderInt(c,'Pivot',app.velocity_pivot,1,127); changed=Controls.number(app,app,'velocity_pivot',96,1,1,127,'Velocity pivot') or hit or changed end
-    if changed then app.transforms.preview_velocity(app,app.velocity_tool_mode,app.velocity_set,app.velocity_scale,app.velocity_pivot,app.velocity_first,app.velocity_last) end
-    if app.transform_preview then if I.Button(c,'Apply') then app.transforms.commit_preview(app); I.CloseCurrentPopup(c) end; I.SameLine(c); if I.Button(c,'Cancel') then app.transforms.cancel_preview(app); I.CloseCurrentPopup(c) end else if I.Button(c,'Preview') then app.transforms.preview_velocity(app,app.velocity_tool_mode,app.velocity_set,app.velocity_scale,app.velocity_pivot,app.velocity_first,app.velocity_last) end end
+    if changed or not app.transform_preview then app.transforms.preview_velocity(app,app.velocity_tool_mode,app.velocity_set,app.velocity_scale,app.velocity_pivot,app.velocity_first,app.velocity_last) end
+    preview_footer(app)
     I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_pitch') then
-    I.Text(c,'Pitch'); I.Separator(c); I.BeginDisabled(c,Selection.count(app.selection)==0)
-    for i,entry in ipairs({{'-12',-12},{'-1',-1},{'+1',1},{'+12',12}}) do if i>1 then I.SameLine(c) end; if I.Button(c,entry[1]) then app.transforms.transpose(app,entry[2]) end end
-    if I.Button(c,'Scale degree -') then app.transforms.transpose_scale(app,-1) end; I.SameLine(c); if I.Button(c,'Scale degree +') then app.transforms.transpose_scale(app,1) end
-    I.EndDisabled(c); I.EndPopup(c)
+  if begin_popup('##lane_pitch') then
+    popup_header(app,'Pitch','Transpose the selection. Changes preview from the original notes.')
+    app.lane_pitch_amount=app.lane_pitch_amount or 0
+    local changed=false
+    if option_card(app,'pitch_semitones','Semitones',not app.lane_pitch_in_scale) then app.lane_pitch_in_scale=false; changed=true end
+    I.SameLine(c)
+    if option_card(app,'pitch_degrees','Scale degrees',app.lane_pitch_in_scale==true) then app.lane_pitch_in_scale=true; changed=true end
+    if app.lane_pitch_in_scale then I.TextDisabled(c,Music.roots[s.scale_root+1]..' '..s.scale_name) end
+    local hit; hit,app.lane_pitch_amount=I.SliderInt(c,'Amount',app.lane_pitch_amount,-24,24,'%+d')
+    changed=Controls.number(app,app,'lane_pitch_amount',0,1,-24,24,'Pitch offset') or hit or changed
+    for index,amount in ipairs({-12,-1,0,1,12}) do
+      if index>1 then I.SameLine(c) end
+      if option_card(app,'pitch_offset'..index,amount==0 and 'Reset' or string.format('%+d',amount),app.lane_pitch_amount==amount) then app.lane_pitch_amount=amount; changed=true end
+    end
+    if changed or not app.transform_preview then app.transforms.preview_pitch(app,app.lane_pitch_amount,app.lane_pitch_in_scale) end
+    preview_footer(app); I.EndPopup(c)
   end
-  if I.BeginPopup(c,'##lane_more') then
+  if begin_popup('##lane_more') then
+    for _,entry in ipairs(app.lane_hidden_tools or {}) do
+      if I.MenuItem(c,entry[1]) then prepare_note_tool(app); app.lane_open_popup=entry[4] end
+    end
+    if #(app.lane_hidden_tools or {})>0 then I.Separator(c) end
     I.TextDisabled(c,'Phrase actions'); I.Separator(c); I.BeginDisabled(c,Selection.count(app.selection)==0)
     for _,entry in ipairs({{'Reverse','reverse'},{'Invert','invert'},{'Chop to grid','chop'},{'Glue touching','glue'}}) do if I.MenuItem(c,entry[1]) then app.transforms[entry[2]](app) end end
     if I.MenuItem(c,'Half time') then app.transforms.scale_time(app,.5) end
@@ -393,33 +545,47 @@ local function note_tool_popups(app)
     if I.MenuItem(c,'Duplicate') then app.clipboard.duplicate(app) end
     I.EndDisabled(c); I.EndPopup(c)
   end
+  I.PopStyleVar(c,4)
 end
 
 function M.draw(app,x,y,width,height)
   local I,c,T=app.ImGui,app.ctx,app.theme; local def=target(app)
   local scope,first,last=automatic_scope(app); local signature=def.id..':'..(app.settings.channel or 0)..':'..scope..':'..string.format('%.6f:%.6f',first,last)
   if app.lane_tool_preview and app.lane_tool_preview.signature~=signature then M.cancel(app,false) end
+  local drawlist=I.GetWindowDrawList(c)
+  I.DrawList_AddRectFilled(drawlist,x-3,y-2,x+width+3,y+height-1,T.panel,6)
   I.PushStyleColor(c,I.Col_Button,T.panel2)
-  local labels={{'Quantize','quantize','Quantize with options','##lane_quantize'},{'Legato','legato','Legato with options','##lane_legato'},{'Humanize','humanize','Humanize timing and velocity','##lane_humanize'},{'Strum / Flam','strum','Strum / Flam live preview','##lane_strum_flam'},{'Arp','arp','Arpeggiator','##lane_arp'},{'Velocity','velocity','Set, ramp, compress or expand velocity','##lane_velocity'},{'Pitch','pitch','Semitone, octave and scale pitch tools','##lane_pitch'}}
+  local labels={{'Timing','quantize','Quantize note timing / automatic preview','##lane_quantize'},{'Scale','scale_quantize','Quantize existing pitches to Harmony\'s key and scale','##lane_scale_quantize'},{'Legato','legato','Legato with options','##lane_legato'},{'Humanize','humanize','Humanize timing and velocity','##lane_humanize'},{'Strum','strum','Strum / Flam live preview','##lane_strum_flam'},{'Arp','arp','Arpeggiator','##lane_arp'},{'Velocity','velocity','Set, ramp, compress or expand velocity','##lane_velocity'},{'Pitch','pitch','Semitone and scale-degree transpose','##lane_pitch'}}
   local select_label='Select All'; local total=(I.CalcTextSize and select(1,I.CalcTextSize(c,select_label)) or #select_label*7)+18+6
   for _,entry in ipairs(labels) do total=total+(I.CalcTextSize and select(1,I.CalcTextSize(c,entry[1])) or #entry[1]*7)+18 end
   total=total+(I.CalcTextSize and select(1,I.CalcTextSize(c,'Shape')) or 35)+18+(I.CalcTextSize and select(1,I.CalcTextSize(c,'More')) or 28)+18+#labels*6+6
   I.SetCursorScreenPos(c,x+math.max(0,(width-total)*.5),y)
-  if I.SmallButton(c,select_label..'##lane_select_all') then if app.controller_selection_active and app.controller_lane then app.clipboard.select_all_cc(app,app.controller_lane,true) else for _,n in ipairs(app.cache:get(false)) do Selection.add(app.selection,n.id) end end end
+  I.PushStyleVar(c,I.StyleVar_FrameRounding,5)
+  I.PushStyleVar(c,I.StyleVar_FrameBorderSize,1)
+  if I.Button(c,select_label..'##lane_select_all') then if app.controller_selection_active and app.controller_lane then app.clipboard.select_all_cc(app,app.controller_lane,true) else for _,n in ipairs(app.cache:get(false)) do Selection.add(app.selection,n.id) end end end
   if I.IsItemHovered(c) then I.SetTooltip(c,app.controller_selection_active and 'Select all points in the active controller lane.' or 'Select all notes in ReaRoll\nThis does not replace REAPER\'s native MIDI-editor selection.') end
-  for _,entry in ipairs(labels) do I.SameLine(c); tool_button(app,entry[1],entry[2],entry[3],entry[4]) end
+  app.lane_hidden_tools={}
+  for _,entry in ipairs(labels) do
+    local current=I.GetItemRectMax(c)
+    local needed=I.CalcTextSize(c,entry[1])+24
+    if current+needed<x+width-150 or entry[2]=='quantize' or entry[2]=='scale_quantize' then
+      I.SameLine(c); tool_button(app,entry[1],entry[2],entry[3],entry[4])
+    else app.lane_hidden_tools[#app.lane_hidden_tools+1]=entry end
+  end
   I.SameLine(c)
-  if I.SmallButton(c,'Shape##lane_shape') then if app.transform_preview then app.transforms.cancel_preview(app) end; I.OpenPopup(c,'##lane_shape_popup') end
+  if I.Button(c,'Shape##lane_shape') then prepare_note_tool(app); I.OpenPopup(c,'##lane_shape_popup') end
   if I.IsItemHovered(c) then I.SetTooltip(c,def.protected and ('Shape is unavailable for protected '..def.label..' messages.') or ('Shape '..def.label..': Curve, LFO and repeating Step')) end
   I.SameLine(c); tool_button(app,'More','more','More phrase actions','##lane_more')
+  I.PopStyleVar(c,2)
   I.PopStyleColor(c)
-  I.SetNextWindowSize(c,430,330,I.Cond_FirstUseEver)
+  if app.lane_open_popup then I.OpenPopup(c,app.lane_open_popup); app.lane_open_popup=nil end
+  I.SetNextWindowSize(c,430,0,I.Cond_Appearing)
   local shape_open=I.BeginPopup(c,'##lane_shape_popup')
   if shape_open then shape_popup(app,def); I.EndPopup(c) elseif app.lane_tool_preview then M.cancel(app) end
   note_tool_popups(app)
   if app.lane_phrase_preview and I.IsPopupOpen and not I.IsPopupOpen(c,'##lane_strum_flam') then app.transforms.cancel_preview(app); app.lane_phrase_preview=nil end
   if app.transform_preview and I.IsPopupOpen then
-    local popup_for={quantize='##lane_quantize',legato='##lane_legato',humanize='##lane_humanize',arp='##lane_arp',velocity='##lane_velocity',strum='##lane_strum_flam',flam='##lane_strum_flam'}
+    local popup_for={quantize='##lane_quantize',scale_quantize='##lane_scale_quantize',pitch='##lane_pitch',legato='##lane_legato',humanize='##lane_humanize',arp='##lane_arp',velocity='##lane_velocity',strum='##lane_strum_flam',flam='##lane_strum_flam'}
     local popup=popup_for[app.transform_preview.kind]
     if popup and not I.IsPopupOpen(c,popup) then app.transforms.cancel_preview(app); app.lane_phrase_preview=nil end
   end

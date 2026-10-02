@@ -4,7 +4,6 @@ local Controls=require 'src.ui.controls'
 local LaneTools=require 'src.ui.lane_tools'
 local Grid=require 'src.grid'
 local Shortcuts=require 'src.shortcuts'
-
 local function positive(value,fallback)
   if type(value)~='number' or value~=value or value<=0 then return fallback or 1 end
   return value
@@ -31,7 +30,12 @@ end
 local function playhead_position(app)
   local playing=(reaper.GetPlayState()&1)~=0
   if not playing then app.playhead_clock=nil; return reaper.GetCursorPosition() end
-  local raw=reaper.GetPlayPosition(); if not app.settings.playhead_smooth then app.playhead_clock=nil; return raw end
+  local continuous=app.settings.follow_playback and app.settings.follow_style=='continuous'
+    and app.viewport and not app.viewport.follow_suspended
+  -- The scrolling viewport and playhead must use the same transport sample.
+  -- An interpolated playhead jitters against a view following raw block edges.
+  local raw=continuous and app.follow_playback_time or reaper.GetPlayPosition()
+  if continuous or not app.settings.playhead_smooth then app.playhead_clock=nil; return raw end
   local now=reaper.time_precise(); local rate=reaper.Master_GetPlayRate and reaper.Master_GetPlayRate(0) or 1
   local clock=app.playhead_clock
   if not clock then clock={position=raw,velocity=rate,wall=now,last_raw=raw,errors={},error_index=1,last_output=raw,phase_error=0}; app.playhead_clock=clock; return raw end
@@ -77,7 +81,7 @@ end
 
 local function playhead_visual(app,v)
   local s=app.settings; local time=playhead_position(app); local qn=reaper.TimeMap2_timeToQN(0,time); local x=v:x_from_qn(qn)
-  if x<v.x or x>v.x+v.w then return nil end
+  if x<v.x or x>v.x+v.w then return nil,qn end
   local width=U.clamp(s.playhead_width or 2,1,6); local opacity=U.clamp(s.playhead_opacity or .92,.05,1); local glow=s.playhead_glow or 0
   local pulse=s.playhead_pulse or 0
   if pulse>0 and (reaper.GetPlayState()&1)~=0 then
@@ -91,7 +95,7 @@ local function playhead_visual(app,v)
   end
   local color=s.playhead_color
   if s.playhead_cycle then color=hsv_color(time*(s.playhead_cycle_speed or .18),.88,1,1) end
-  return {x=x,qn=qn,time=time,width=width,opacity=opacity,glow=glow,trail=s.playhead_trail or 0,color=color,wave=s.playhead_wave and (s.playhead_wave_amount or .45) or 0,rainbow=s.playhead_rainbow,sparks=s.playhead_sparks and (s.playhead_spark_amount or .45) or 0,matrix=s.playhead_matrix and (s.playhead_matrix_amount or .55) or 0,scan=s.playhead_scan and (s.playhead_scan_amount or .55) or 0,scan_direction=s.playhead_scan_direction or 'down',shadow=s.playhead_shadow or 0}
+  return {x=x,qn=qn,time=time,width=width,opacity=opacity,glow=glow,trail=s.playhead_trail or 0,color=color,wave=s.playhead_wave and (s.playhead_wave_amount or .45) or 0,rainbow=s.playhead_rainbow,sparks=s.playhead_sparks and (s.playhead_spark_amount or .45) or 0,matrix=s.playhead_matrix and (s.playhead_matrix_amount or .55) or 0,scan=s.playhead_scan and (s.playhead_scan_amount or .55) or 0,scan_direction=s.playhead_scan_direction or 'down',shadow=s.playhead_shadow or 0},qn
 end
 
 local function draw_led_line(I,d,p,y0,bottom,x,color,width,opacity,stable)
@@ -307,16 +311,7 @@ reselect=function(app,wanted)
 end
 
 local function chord_pitches(app,root)
-  local s=app.settings
-  if s.chord_diatonic and s.scale_enabled then
-    return app.music.diatonic_chord(s.scale_root,s.scale_name,root,s.chord_size,s.chord_inversion)
-  end
-  local pitches={}
-  for _,interval in ipairs(app.music.chords[s.chord_name] or app.music.chords.Major) do pitches[#pitches+1]=U.clamp(root+interval,0,127) end
-  local inversion=math.max(0,math.min(#pitches-1,math.floor(s.chord_inversion or 0)))
-  for i=1,inversion do pitches[i]=U.clamp(pitches[i]+12,0,127) end
-  table.sort(pitches)
-  return pitches
+  return app.music.chord_pitches(app.settings,root)
 end
 
 local function cursor_qn(app,v,mx)
@@ -683,7 +678,7 @@ local function draw_placement_preview(app,d,v,mx,my,hover)
   if app.gesture or hover or s.mode=='slice' or s.mode=='glue' or mx<v.x or mx>v.x+v.w or my<v.y or my>v.y+v.h then return end
   local raw_q=v:qn_from_x(mx); local q=U.snap_time(s,raw_q)
   q=U.clamp(q,app.item_start_qn,math.max(app.item_start_qn,(app.item_end_qn or q+length)-length))
-  local hover_pitch=v:pitch_from_y(my); local root=hover_pitch; if s.scale_enabled and s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
+  local hover_pitch=v:pitch_from_y(my); local root=hover_pitch; if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
   local pitches=s.mode=='chord' and chord_pitches(app,root) or {root}
   local x1,x2=math.max(v.x,v:x_from_qn(q)),math.min(v.x+v.w,v:x_from_qn(q+length))
   local channel_col=s.uniform_note_color and T.note or (T.channel_colors[(s.channel or 0)+1] or T.note); local velocity_col=U.color_scale(channel_col,.72+.28*(s.velocity/127))
@@ -820,7 +815,7 @@ local function note_properties(app)
     changed,app.property_muted=I.Checkbox(c,'Muted',app.property_muted or false)
     if I.Button(c,'Apply',100,0) then
       local chosen=Selection.list(app.selection,app.cache:get(false)); if #chosen>0 then app.edit:begin('ReaRoll: note properties',app.take); local wanted={}
-        for _,n in ipairs(chosen) do local channel=(app.property_channel or 1)-1; reaper.MIDI_SetNote(app.take,n.index,nil,app.property_muted,nil,nil,channel,nil,app.property_velocity,true); app.edit:touch(); app.edit:track_note(n.index,{muted=app.property_muted,chan=channel,vel=app.property_velocity}); wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=app.property_velocity} end
+        for _,n in ipairs(chosen) do local channel=(app.property_channel or 1)-1; app.edit:set_properties(app.take,n.index,{muted=app.property_muted,chan=channel,vel=app.property_velocity}); wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=app.property_velocity} end
         app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted)
       end; I.CloseCurrentPopup(c)
     end
@@ -869,14 +864,14 @@ local function draw_scrollbars(app,d,v,gx,gy,grid_h,vy,lane_h,hbar_h,vbar_w,mx,m
   arrow('##timeline_right',hright_x1,htrack_y,hright_x2,htrack_y+hbar_h,'right',function(wheel) v:pan(-(wheel or 1)*50,0) end)
 
   local hz_x1,hz_x2=hright_x2,gx+v.w; local minus_w=button_w; local plus_w=button_w
-  arrow('##time_zoom_out',hz_x1,htrack_y,hz_x1+minus_w,htrack_y+hbar_h,'-',function(wheel) app:zoom_time(wheel and (wheel>0 and .88 or 1.14) or 1.2,v.x+v.w*.5) end)
-  arrow('##time_zoom_in',hz_x2-plus_w,htrack_y,hz_x2,htrack_y+hbar_h,'+',function(wheel) app:zoom_time(wheel and (wheel>0 and .88 or 1.14) or .82,v.x+v.w*.5) end)
+  arrow('##time_zoom_out',hz_x1,htrack_y,hz_x1+minus_w,htrack_y+hbar_h,'-',function(wheel) app:zoom_bar(wheel and (wheel>0 and .88 or 1.14) or 1.2) end)
+  arrow('##time_zoom_in',hz_x2-plus_w,htrack_y,hz_x2,htrack_y+hbar_h,'+',function(wheel) app:zoom_bar(wheel and (wheel>0 and .88 or 1.14) or .82) end)
   local hz_track1,hz_track2=hz_x1+minus_w+3,hz_x2-plus_w-3; local hz_range=math.max(1,hz_track2-hz_track1)
   local hz_ratio=U.clamp(math.log((s.visible_qn or 8)/(1/16))/math.log(256/(1/16)),0,1); local hz_thumb=hz_track1+hz_ratio*hz_range
   I.DrawList_AddLine(d,hz_track1,htrack_y+hbar_h*.5,hz_track2,htrack_y+hbar_h*.5,T.scrollbar_thumb,2); I.DrawList_AddCircleFilled(d,hz_thumb,htrack_y+hbar_h*.5,4,T.accent)
   I.SetCursorScreenPos(c,hz_track1,htrack_y); I.InvisibleButton(c,'##time_zoom_bar',hz_range,hbar_h)
-  if I.IsItemActive(c) then local ratio=U.clamp((mx-hz_track1)/hz_range,0,1); local wanted=(1/16)*((256/(1/16))^ratio); app:zoom_time(wanted/s.visible_qn,v.x+v.w*.5) end
-  if I.IsItemHovered(c) then local wheel=I.GetMouseWheel(c); if wheel~=0 then app:zoom_time(wheel>0 and .88 or 1.14,v.x+v.w*.5) end end
+  if I.IsItemActive(c) then local ratio=U.clamp((mx-hz_track1)/hz_range,0,1); local wanted=(1/16)*((256/(1/16))^ratio); app:zoom_bar(wanted/s.visible_qn) end
+  if I.IsItemHovered(c) then local wheel=I.GetMouseWheel(c); if wheel~=0 then app:zoom_bar(wheel>0 and .88 or 1.14) end; I.SetTooltip(c,'Zoom around the edit cursor. Outside the view, keep the nearest visible edge anchored. Playback does not move the zoom focus.') end
 
   local vtrack_x=gx+v.w+2; local column=vbar_w; local vtrack_y1,vtrack_y2=gy+column,gy+grid_h-column
   local total=v.fold and #v.fold or 128; local rows=math.min(total,v:rows()); local vtrack_h=vtrack_y2-vtrack_y1; local vthumb_h=math.max(28,vtrack_h*(rows/math.max(1,total))); local vtravel=math.max(0,vtrack_h-vthumb_h)
@@ -907,7 +902,8 @@ local function draw_scrollbars(app,d,v,gx,gy,grid_h,vy,lane_h,hbar_h,vbar_w,mx,m
   if I.IsItemActivated(c) then
     local ratio=U.clamp((s.row_height-8)/24,0,1); local thumb_y=sy2-ratio*(sy2-sy1)
     local js_x,js_y=nil,nil; if reaper.JS_Mouse_GetPosition then js_x,js_y=reaper.JS_Mouse_GetPosition() end
-    app.pitch_zoom_drag={sy1=sy1,sy2=sy2,mouse_y=my,thumb_y=thumb_y,row_height=s.row_height,js_x=js_x,js_y=js_y}
+    local anchor_y=v.y+v.h*.5
+    app.pitch_zoom_drag={sy1=sy1,sy2=sy2,mouse_y=my,thumb_y=thumb_y,row_height=s.row_height,js_x=js_x,js_y=js_y,anchor_y=anchor_y,anchor_pitch=v:pitch_from_y(anchor_y)}
   end
   if I.IsItemActive(c) and app.pitch_zoom_drag then
     local drag=app.pitch_zoom_drag; local delta=drag.mouse_y-my
@@ -915,7 +911,7 @@ local function draw_scrollbars(app,d,v,gx,gy,grid_h,vy,lane_h,hbar_h,vbar_w,mx,m
       local _,js_y=reaper.JS_Mouse_GetPosition(); delta=drag.js_y-js_y
       if math.abs(delta)>.01 then reaper.JS_Mouse_SetPosition(drag.js_x,drag.js_y) end
     end
-    if math.abs(delta)>.01 then drag.row_height=U.clamp(drag.row_height+delta*.18,8,32); v:zoom_pitch(drag.row_height/s.row_height,v.y+v.h*.5); drag.mouse_y=my end
+    if math.abs(delta)>.01 then drag.row_height=U.clamp(drag.row_height+delta*.18,8,32); v:zoom_pitch(drag.row_height/s.row_height,drag.anchor_y,drag.anchor_pitch); drag.mouse_y=my end
     if I.MouseCursor_None then I.SetMouseCursor(c,I.MouseCursor_None) end
     I.DrawList_AddRectFilled(d,px1,py1,px2,py2,T.panel,6)
     I.DrawList_AddRect(d,px1,py1,px2,py2,T.grid,6,I.DrawFlags_None,1)
@@ -1153,8 +1149,10 @@ local function begin_gesture(app,take,v,notes,hit,edge,mx,my,mods)
     app.gesture={kind='slice',x1=mx,y1=my,x2=mx,y2=my,slices={},last_x=mx,last_y=my,unsnapped=mods.alt}; collect_slice_marks(app,v,notes,app.gesture,mx,my,mods); return
   elseif s.mode=='mute' and not (hit and edge) then
     if hit then
-      local target=not hit.muted; app.edit:begin(target and 'ReaRoll: mute notes' or 'ReaRoll: unmute notes',take); app.edit:set_muted(take,hit.index,target); hit.muted=target
-      app.gesture={kind='mute',target=target,visited={[hit.id]=true}}
+      local target=not hit.muted; local chosen=selected_or_one(app,hit); local visited={}
+      app.edit:begin(target and 'ReaRoll: mute notes' or 'ReaRoll: unmute notes',take)
+      for _,n in ipairs(chosen) do app.edit:set_muted(take,n.index,target); n.muted=target; visited[n.id]=true end
+      app.gesture={kind='mute',target=target,visited=visited}
     end
     return
   elseif hit then
@@ -1168,11 +1166,11 @@ local function begin_gesture(app,take,v,notes,hit,edge,mx,my,mods)
   elseif s.mode=='chord' then
     local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local root=v:pitch_from_y(my)
     if q>=app.item_end_qn then return end
-    if s.scale_enabled and s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
+    if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
     local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); local pitches=chord_pitches(app,root)
     local preview={}; Selection.clear(app.selection)
     if s.chord_drag_length then
-      local _,base=reaper.MIDI_CountEvts(take); local items={}; app.edit:begin('ReaRoll: draw '..s.chord_name..' chord',take)
+      local base=app.edit:note_count(take); local items={}; app.edit:begin('ReaRoll: draw '..s.chord_name..' chord',take)
       for i,pitch in ipairs(pitches) do
         preview[#preview+1]=pitch
         if app.edit:insert(take,start,ending,pitch,s.velocity,s.channel,true) then
@@ -1195,9 +1193,9 @@ local function begin_gesture(app,take,v,notes,hit,edge,mx,my,mods)
   elseif mods.shift then
     app.gesture={kind='marquee',x1=mx,y1=my,x2=mx,y2=my,qn1=v:qn_from_x(mx),qn2=v:qn_from_x(mx),pitch1=v:pitch_from_y(my),pitch2=v:pitch_from_y(my),add=mods.ctrl}; if not mods.ctrl then Selection.clear(app.selection) end
   else
-    local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local p=v:pitch_from_y(my); if s.scale_enabled and s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
+    local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local p=v:pitch_from_y(my); if s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
     if q>=app.item_end_qn then return end
-    local _,index=reaper.MIDI_CountEvts(take); app.edit:begin('ReaRoll: draw note',take); local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); app.edit:insert(take,start,ending,p,s.velocity,s.channel,true)
+    local index=app.edit:note_count(take); app.edit:begin('ReaRoll: draw note',take); local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); app.edit:insert(take,start,ending,p,s.velocity,s.channel,true)
     local n={id='new:'..tostring(index),index=index,s=start,e=ending,pitch=p,vel=s.velocity,chan=s.channel,muted=false}
     app.cache.notes[#app.cache.notes+1]=n; Selection.set_only(app.selection,n.id)
     app.gesture={kind='draw',mx=mx,note=n,index=index,start=start,last_e=ending,pitch=p,items={{note=n,index=index,s=start,e=ending,pitch=p,vel=s.velocity}}}; app.audition:play(p,s.velocity,s.channel)
@@ -1251,7 +1249,7 @@ local function update_gesture(app,take,v,mx,my,mods)
   if g.kind=='copy_pending' then
     if math.abs(mx-g.mx)<4 and math.abs(my-g.my)<4 then return end
     local chosen=Selection.has(app.selection,g.hit.id) and Selection.list(app.selection,app.cache:get(true)) or {g.hit}
-    app.edit:begin('ReaRoll: duplicate notes',take); local _,base=reaper.MIDI_CountEvts(take); local copies={}; Selection.clear(app.selection)
+    app.edit:begin('ReaRoll: duplicate notes',take); local base=app.edit:note_count(take); local copies={}; Selection.clear(app.selection)
     for i,n in ipairs(chosen) do
       app.edit:insert(take,n.s,n.e,n.pitch,n.vel,n.chan,true,n.muted)
       local copy={id='new:'..tostring(base+i-1),index=base+i-1,s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan,muted=n.muted}
@@ -1263,7 +1261,7 @@ local function update_gesture(app,take,v,mx,my,mods)
     local raw=v:qn_from_x(mx)-g.anchor_qn; local mode=(mods.alt and 'off' or U.snap_mode(s)); local dx_qn=raw
     if mode=='relative' then dx_qn=U.snap(raw,s.grid_qn) elseif mode=='absolute' then local first_qn=reaper.MIDI_GetProjQNFromPPQPos(take,g.items[1].s); dx_qn=U.snap(first_qn+raw,s.grid_qn)-first_qn end
     local dx=dx_qn*v.ppq_per_qn; local dp=v:pitch_from_y(my)-g.anchor_pitch
-    if s.scale_enabled and s.scale_snap and #g.items==1 then local target=app.music.snap(s.scale_root,s.scale_name,g.items[1].pitch+dp,dp); dp=target-g.items[1].pitch end
+    if s.scale_snap and #g.items==1 then local target=app.music.snap(s.scale_root,s.scale_name,g.items[1].pitch+dp,dp); dp=target-g.items[1].pitch end
     local item_s=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_start_qn); local min_s,max_e=math.huge,-math.huge
     for _,a in ipairs(g.items) do min_s=math.min(min_s,a.s); max_e=math.max(max_e,a.e) end
     local item_e=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn)
@@ -1300,17 +1298,17 @@ local function update_gesture(app,take,v,mx,my,mods)
     end
   elseif g.kind=='paint' then
     local length=Grid.note_length(s)
-    local q=U.snap(v:qn_from_x(mx),s.grid_qn); local p=v:pitch_from_y(my); if s.scale_enabled and s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
+    local q=U.snap(v:qn_from_x(mx),s.grid_qn); local p=v:pitch_from_y(my); if s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
     local q_steps=g.last_q and math.abs(math.floor((q-g.last_q)/s.grid_qn+.5)) or 0; local p_steps=g.last_pitch and math.abs(p-g.last_pitch) or 0; local steps=math.max(1,q_steps,p_steps)
     local painted=false
     for i=1,steps do
       local ratio=i/steps; local cell_q=g.last_q and U.snap(g.last_q+(q-g.last_q)*ratio,s.grid_qn) or q; local cell_p=g.last_pitch and math.floor(g.last_pitch+(p-g.last_pitch)*ratio+.5) or p
-      if s.scale_enabled and s.scale_snap then cell_p=app.music.snap(s.scale_root,s.scale_name,cell_p,p-(g.last_pitch or p)) end
+      if s.scale_snap then cell_p=app.music.snap(s.scale_root,s.scale_name,cell_p,p-(g.last_pitch or p)) end
       local cell=string.format('%.6f:%d:%d',cell_q,cell_p,s.channel or 0)
       if not g.visited[cell] and cell_q>=app.item_start_qn and cell_q<app.item_end_qn then
         local sp=reaper.MIDI_GetPPQPosFromProjQN(take,cell_q); local ep=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,cell_q+length))
-        if not g.occupied[cell] then
-          local _,index=reaper.MIDI_CountEvts(take)
+        if not s.prevent_overlaps or not g.occupied[cell] then
+          local index=app.edit:note_count(take)
           if app.edit:insert(take,sp,ep,cell_p,s.velocity,s.channel,true) then app.cache.notes[#app.cache.notes+1]={id='paint:'..tostring(index),index=index,s=sp,e=ep,pitch=cell_p,vel=s.velocity,chan=s.channel,muted=false}; painted=true end
           g.occupied[cell]=true
         end
@@ -1381,37 +1379,6 @@ local function auto_scroll(app,v,mx,my)
   return dx~=0 or dp~=0
 end
 
-local function prevent_note_overlaps(app,g)
-  if not app.settings.prevent_overlaps or not g or not g.items then return end
-  local touched={}; for _,a in ipairs(g.items) do
-    local index=a.index or (a.note and a.note.index)
-    if index~=nil then touched[index]=true end
-  end
-  local groups={}
-  for _,n in ipairs(app.cache:get(true)) do
-    local key=tostring(n.chan or 0)..':'..tostring(n.pitch); groups[key]=groups[key] or {}; groups[key][#groups[key]+1]=n
-  end
-  local deletes,delete_seen={},{}
-  for _,group in pairs(groups) do
-    table.sort(group,function(a,b) if a.s==b.s then return a.e<b.e end; return a.s<b.s end)
-    for i=1,#group-1 do local earlier,later=group[i],group[i+1]
-      if earlier.e>later.s and (touched[earlier.index] or touched[later.index]) then
-        if later.s>earlier.s+1 then
-          app.edit:set(earlier.index,app.take,nil,later.s,nil,nil); earlier.e=later.s
-        else
-          -- Two same-pitch notes cannot share a start safely in REAPER's raw
-          -- MIDI stream. Prefer the note participating in this gesture.
-          local remove=(touched[later.index] and not touched[earlier.index]) and earlier or later
-          if remove.index~=nil and not delete_seen[remove.index] then deletes[#deletes+1]=remove.index; delete_seen[remove.index]=true; remove.e=remove.s end
-        end
-      end
-    end
-  end
-  -- MIDI note indices are positional. Defer every deletion until all SetNote
-  -- calls have used the original indices, then delete high-to-low in one pass.
-  if #deletes>0 then app.edit:delete_indices(app.take,deletes) end
-end
-
 local function finish_gesture(app,notes)
   local g=app.gesture; if not g then return end
   if g.kind=='copy_pending' then if g.click_add then Selection.add(app.selection,g.hit.id) else Selection.toggle(app.selection,g.hit.id) end; app.gesture=nil; return
@@ -1465,6 +1432,10 @@ function C.draw(app)
   local x0,y0=I.GetCursorScreenPos(c); local gx,gy=x0+key_w,y0+ruler_h; local v=app.viewport
   local source_start,source_end=source_timeline_bounds(app)
   v:set_geometry(gx,gy,math.max(100,aw-key_w-vbar_w-2),grid_h,take,source_start,source_end)
+  local transport_state=reaper.GetPlayState()
+  app.follow_playback_time=(transport_state&1)~=0 and reaper.GetPlayPosition() or nil
+  v:update_follow(transport_state,app.follow_playback_time and reaper.TimeMap2_timeToQN(0,app.follow_playback_time) or nil)
+  v:set_geometry(gx,gy,v.w,grid_h,take,source_start,source_end)
   local item_ppq0=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_start_qn)
   local item_ppq1=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn)
   local fold_notes={}
@@ -1486,8 +1457,8 @@ function C.draw(app)
   if s.mode=='glue' then local best=math.huge; for _,boundary in ipairs(glue_boundaries(notes,s.channel or 0)) do local bx,by=v:x_from_ppq(boundary.ppq),v:y_from_pitch(boundary.pitch); local distance=by and math.sqrt((mx-bx)^2+(my-(by+s.row_height*.5))^2) or math.huge; if distance<=10 and distance<best then glue_hover,best=boundary,distance end end end
   local hover_pitch=nil; if my>=gy and my<=gy+grid_h and mx>=x0 and mx<=gx+v.w then hover_pitch=v:pitch_from_y(my) end
   local d=I.GetWindowDrawList(c)
-  draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
   local playhead=playhead_visual(app,v)
+  draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
   I.DrawList_PushClipRect(d,gx,gy,gx+v.w,gy+grid_h,true); draw_playhead_pass(app,d,playhead,gy,gy+grid_h,false); I.DrawList_PopClipRect(d)
   local status=string.format('%s  ·  V%d  ·  %s',s.mode:sub(1,1):upper()..s.mode:sub(2),s.velocity,s.adaptive_grid and 'Auto' or string.format('G %.3g',s.grid_qn))
   if hover then
@@ -1728,7 +1699,7 @@ function C.draw(app)
     local pitch=v:pitch_from_y(my)
     if app.key_preview_pitch~=pitch then
       if s.mode=='chord' then
-        local root=pitch; if s.scale_enabled and s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
+        local root=pitch; if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
         app.audition:play_many(chord_pitches(app,root),s.velocity,s.channel)
       else app.audition:play(pitch,s.velocity,s.channel) end
       app.key_preview_pitch=pitch
@@ -1818,6 +1789,8 @@ function C.draw(app)
     local position=reaper.format_timestr_pos and reaper.format_timestr_pos(reaper.TimeMap2_QNToTime(0,q),'',2) or string.format('%.2f',q)
     local maximum=lane.pitch and 16383 or 127; local minimum=(lane.cc or lane.pitch or lane.status) and 0 or 1
     local value=U.clamp(math.floor((vy+lane_h-3-my)/math.max(1,lane_h-7)*maximum+.5),minimum,maximum)
+    if lane_closest and lane_dist<=100 then value=lane.pitch and ((lane_closest.msg3<<7)|lane_closest.msg2) or (lane.status and lane_closest.msg2 or lane_closest.msg3)
+    elseif velocity_hover and velocity_distance<=225 then value=velocity_hover.vel end
     if lane.switch then value=value>=64 and 127 or 0 end
     local value_text=(lane.cc or lane.pitch or lane.status) and controller_value_label(s,lane,value) or tostring(value); local value_w=I.CalcTextSize(c,value_text)
     I.DrawList_PushClipRect(d,x0,vy,gx-1,vy+lane_h,true)
@@ -1832,17 +1805,23 @@ function C.draw(app)
   end
   if lane_hovered and I.IsMouseClicked(c,I.MouseButton_Right) and not (lane.cc or lane.pitch or lane.status) and not app.gesture then local anchor=mx; if app.lane_time_selection then local left,right=v:x_from_qn(app.lane_time_selection.start_qn),v:x_from_qn(app.lane_time_selection.end_qn); if math.abs(mx-left)<=8 then anchor=right elseif math.abs(mx-right)<=8 then anchor=left end end; if s.snap_enabled then anchor=v:x_from_qn(U.snap(v:qn_from_x(anchor),s.grid_qn)) end; app.controller_selection_active=false; app.gesture={kind='cc_marquee',range_only=true,button=I.MouseButton_Right,x1=anchor,y1=vy,x2=anchor,y2=vy+lane_h,press_x=mx,channel=s.channel or 0,bottom=vy+lane_h-3,height=lane_h-7} end
   if lane_hovered and (lane.cc or lane.pitch or lane.status) and not app.gesture then
-    local readout=''; if lane_closest and lane_dist<=100 then
-      local value=lane.pitch and ((lane_closest.msg3<<7)|lane_closest.msg2) or (lane.status and lane_closest.msg2 or lane_closest.msg3)
-      local q=reaper.MIDI_GetProjQNFromPPQPos(take,lane_closest.ppq); local position=reaper.format_timestr_pos and reaper.format_timestr_pos(reaper.TimeMap2_QNToTime(0,q),'',2) or string.format('%.3f QN',q)
-      readout='\nPoint: '..controller_value_label(s,lane,value)..' at '..position..(lane.pitch and ' · raw '..tostring(value) or '')
-    end
-    I.SetTooltip(c,(lane.protected and 'Protected channel-mode lane: existing points are view/move/delete only.' or ('Drag: draw or reshape '..lane.label))..readout..'\nCtrl-click a point: add/remove selection\nRight-click empty lane: clear selection\nRight-drag empty lane: snapped musical range\nRight-drag a range edge: resize it\nDrag selected points: move\nShift-drag selected points: duplicate\nRight-click near a point: delete it\nThe mouse wheel here never scrolls note pitches.')
+    local range=app.lane_time_selection
+    local range_edge=range and (math.abs(mx-v:x_from_qn(range.start_qn))<=8 or math.abs(mx-v:x_from_qn(range.end_qn))<=8)
+    local tip
+    if lane_closest and lane_dist<=100 then
+      tip=lane_closest.selected and 'Drag to move selected points · Shift-drag to duplicate' or 'Drag to move · Ctrl-click to select'
+      tip=tip..'\nRight-click to delete'
+    elseif range_edge then tip='Right-drag to resize range'
+    elseif lane.protected then tip='Protected lane: edit existing points only\nRight-drag to select a range'
+    else tip='Drag to draw · Right-drag to select a range' end
+    I.SetTooltip(c,tip)
   elseif lane_hovered and velocity_hover and velocity_distance<=225 and not app.gesture then
     I.SetMouseCursor(c,I.MouseCursor_ResizeNS)
-    I.SetTooltip(c,string.format('%s  velocity %d\nDrag the handle to edit%s\nDrag empty lane space to paint velocities; hold Shift for a straight line.',U.pitch_name(velocity_hover.pitch),velocity_hover.vel,Selection.has(app.selection,velocity_hover.id) and ' the selected notes' or ' this note'))
+    I.SetTooltip(c,Selection.has(app.selection,velocity_hover.id) and 'Drag to change selected note velocities' or 'Drag to change note velocity')
   elseif lane_hovered and not app.gesture then
-    I.SetTooltip(c,'Left-drag to paint note velocities.\nHold Shift while dragging for a straight velocity line.\nRight-click empty lane: clear the selected range.\nRight-drag: create a snapped range.\nThe mouse wheel here never scrolls note pitches.')
+    local range=app.lane_time_selection
+    local range_edge=range and (math.abs(mx-v:x_from_qn(range.start_qn))<=8 or math.abs(mx-v:x_from_qn(range.end_qn))<=8)
+    I.SetTooltip(c,range_edge and 'Right-drag to resize range' or 'Drag to paint velocities · Shift: straight line\nRight-drag to select a range')
   end
   if lane.cc or lane.pitch or lane.status then
     if lane_hovered and I.IsMouseClicked(c,I.MouseButton_Left) and not app.gesture then

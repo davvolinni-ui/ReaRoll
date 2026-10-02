@@ -5,39 +5,8 @@ local M={}
 local Icons=require 'src.ui.icons'
 local Controls=require 'src.ui.controls'
 local Grid=require 'src.grid'
-local Suite=require 'src.suite_theme'
-local Appearance=require 'src.ui.appearance'
+local Harmony=require 'src.ui.harmony'
 local grids={{'1/4',1},{'1/8',.5},{'1/16',.25},{'1/32',.125},{'1/16T',1/6}}
-
-local function chord_controls(app)
-  local I,c,s=app.ImGui,app.ctx,app.settings
-  local changed; changed,s.chord_diatonic=I.Checkbox(c,'Use selected scale',s.chord_diatonic)
-  changed,s.chord_drag_length=I.Checkbox(c,'Drag to set length',s.chord_drag_length)
-  if I.IsItemHovered(c) then I.SetTooltip(c,'Press and drag to set the duration of all chord notes. Disable for one-click stamping.') end
-  I.SetNextItemWidth(c,190)
-  if I.BeginCombo(c,'Fixed shape##chord_type',s.chord_name) then
-    if app.music.chord_groups then
-      for _,group in ipairs(app.music.chord_groups) do
-        if I.BeginMenu(c,group[1]) then
-          for _,name in ipairs(group[2]) do if I.Selectable(c,name,name==s.chord_name) then s.chord_name=name end end
-          I.EndMenu(c)
-        end
-      end
-    else
-      for _,name in ipairs(app.music.chord_order) do if I.Selectable(c,name,name==s.chord_name) then s.chord_name=name end end
-    end
-    I.EndCombo(c)
-  end
-  I.BeginDisabled(c,not s.chord_diatonic)
-  if I.RadioButton(c,'Triad',s.chord_size==3) then s.chord_size=3; s.chord_inversion=math.min(s.chord_inversion,2) end
-  I.SameLine(c); if I.RadioButton(c,'Seventh',s.chord_size==4) then s.chord_size=4 end
-  I.EndDisabled(c)
-  I.SetNextItemWidth(c,190)
-  local inversion_count=s.chord_diatonic and (s.chord_size or 3) or #(app.music.chords[s.chord_name] or app.music.chords.Major)
-  s.chord_inversion=math.min(s.chord_inversion,math.max(0,inversion_count-1))
-  if I.BeginCombo(c,'Inversion##chord_inversion','Inversion '..tostring(s.chord_inversion)) then for inv=0,inversion_count-1 do if I.Selectable(c,'Inversion '..inv,s.chord_inversion==inv) then s.chord_inversion=inv end end; I.EndCombo(c) end
-  I.TextDisabled(c,s.chord_diatonic and 'Scale mode builds from the clicked degree.' or 'Fixed mode uses the selected chord shape.')
-end
 
 local function main_menu(app)
   local I,c,s=app.ImGui,app.ctx,app.settings
@@ -54,8 +23,12 @@ local function main_menu(app)
     I.Separator(c)
     if I.MenuItem(c,'Appearance...') then app.appearance_open=true end
     if I.MenuItem(c,'Keyboard shortcuts...') then app.shortcuts_open=true end
-    local changed; changed,s.fold_enabled=I.Checkbox(c,'Fold to used pitches',s.fold_enabled)
+    local changed; changed,s.midi_preview_enabled=I.Checkbox(c,'MIDI note preview',s.midi_preview_enabled)
+    if changed and not s.midi_preview_enabled then app.audition:stop() end
+    if I.IsItemHovered(c) then I.SetTooltip(c,'Audition notes while drawing, moving, painting, or clicking the piano keyboard.') end
+    changed,s.fold_enabled=I.Checkbox(c,'Fold to used pitches',s.fold_enabled)
     changed,s.prevent_overlaps=I.Checkbox(c,'Prevent same-pitch overlaps',s.prevent_overlaps)
+    if I.IsItemHovered(c) then I.SetTooltip(c,'When enabled, note edits trim or replace overlapping notes on the same pitch and MIDI channel.\nWhen disabled, overlaps are allowed and neighboring notes keep their timing and length.') end
     changed,s.ghost_enabled=I.Checkbox(c,'Ghost notes',s.ghost_enabled)
     I.Separator(c); I.TextDisabled(c,'Bottom-docked MIDI sketch editor'); I.EndPopup(c)
   end
@@ -65,6 +38,8 @@ local function view_menu(app)
   local I,c,s=app.ImGui,app.ctx,app.settings
   if Icons.button(app,'view_menu','view','View') then I.OpenPopup(c,'##view_menu') end
   if I.BeginPopup(c,'##view_menu') then
+    if I.MenuItem(c,'Follow: '..app.viewport:follow_label(),nil,s.follow_playback and not app.viewport.follow_suspended) then app.viewport:toggle_follow() end
+    if I.IsItemHovered(c) then I.SetTooltip(c,'Click to cycle Off / Page / Continuous. Continuous keeps the playhead at 35% of the view.\nStop restores the starting view. Manual scrolling suspends Follow; click to resume. Pause keeps the current view.') end
     local changed; changed,s.fold_enabled=I.Checkbox(c,'Fold to used pitches',s.fold_enabled)
     if changed then s.fold_offset=0 end
     if Controls.toggle(app,s,'fold_enabled',false,'Fold') then s.fold_offset=0 end
@@ -81,36 +56,6 @@ local function view_menu(app)
     if I.MenuItem(c,'Decrease note height') then app.viewport:zoom_pitch(.85,app.viewport.y+app.viewport.h*.5) end
     I.EndDisabled(c)
     I.Separator(c); I.TextDisabled(c,'Ctrl + wheel: timeline zoom'); I.TextDisabled(c,'Ctrl + Alt + wheel: pitch zoom'); I.TextDisabled(c,'Middle-drag: pan')
-    I.EndPopup(c)
-  end
-end
-
-local function setup_menu(app)
-  local I,c,s=app.ImGui,app.ctx,app.settings
-  if Icons.button(app,'setup_menu','setup','Setup') then I.OpenPopup(c,'##setup_menu') end
-  if I.BeginPopup(c,'##setup_menu') then
-    if I.MenuItem(c,'Appearance / suite themes...') then app.appearance_open=true end
-    if I.MenuItem(c,'Keyboard shortcuts...') then app.shortcuts_open=true end
-    I.Separator(c)
-    local changed; changed,s.scale_enabled=I.Checkbox(c,'Scale highlighting',s.scale_enabled)
-    Controls.toggle(app,s,'scale_enabled',false,'Scale highlighting')
-    if s.scale_enabled then
-      I.SetNextItemWidth(c,70)
-      if I.BeginCombo(c,'Root##scale_root',app.music.roots[s.scale_root+1]) then for i,n in ipairs(app.music.roots) do if I.Selectable(c,n,i-1==s.scale_root) then s.scale_root=i-1 end end; I.EndCombo(c) end
-      Controls.number(app,s,'scale_root',0,1,0,11,'Scale root (C=0)')
-      I.SetNextItemWidth(c,130)
-      if I.BeginCombo(c,'Scale##scale_name',s.scale_name) then for _,n in ipairs(app.music.scale_order) do if I.Selectable(c,n,n==s.scale_name) then s.scale_name=n end end; I.EndCombo(c) end
-      Controls.choice(app,s,'scale_name','Major',app.music.scale_order,'Scale')
-      changed,s.scale_snap=I.Checkbox(c,'Pitch Safe',s.scale_snap)
-      Controls.toggle(app,s,'scale_snap',false,'Pitch Safe')
-    end
-    I.Separator(c); changed,s.prevent_overlaps=I.Checkbox(c,'Prevent same-pitch overlaps',s.prevent_overlaps)
-    if I.IsItemHovered(c) then I.SetTooltip(c,'Trim an earlier note when an edit would overlap another note on the same pitch and channel. This prevents ambiguous MIDI note-off pairing.') end
-    I.Separator(c); changed,s.ghost_enabled=I.Checkbox(c,'Ghost notes',s.ghost_enabled)
-    Controls.toggle(app,s,'ghost_enabled',false,'Ghost notes')
-    if s.ghost_enabled then
-      I.TextDisabled(c,'Sources are controlled by the MIDI Track List.')
-    end
     I.EndPopup(c)
   end
 end
@@ -144,37 +89,12 @@ function M.draw(app)
     end
   end
   group_gap()
-  local chord_clicked,chord_hot=Icons.button(app,'mode_chord','chord','Chord tool\nClick again for chord options',s.mode=='chord')
+  local chord_clicked,chord_hot=Icons.button(app,'mode_chord','chord','Chord tool\nClick again to open Harmony',s.mode=='chord')
   if chord_clicked then
-    if s.mode=='chord' then app.chord_palette_open=not app.chord_palette_open else s.mode='chord'; app.chord_palette_open=true end
+    if s.mode=='chord' and app.chord_palette_open then app.chord_palette_open=false else s.mode='chord'; Harmony.open(app) end
   end
-  if chord_hot and I.IsMouseClicked(c,I.MouseButton_Right) then app.chord_palette_open=true end
-  if icon('scale_options','scale','Scale and highlighting options',s.scale_enabled) then I.OpenPopup(c,'##scale_options_popup') end
-  if I.BeginPopup(c,'##scale_options_popup') then
-    I.TextDisabled(c,'Scale & Highlighting'); I.Separator(c)
-    local changed; changed,s.scale_enabled=I.Checkbox(c,'Highlight scale rows',s.scale_enabled)
-    changed,s.scale_snap=I.Checkbox(c,'Pitch Safe drawing',s.scale_snap)
-    I.SetNextItemWidth(c,90)
-    if I.BeginCombo(c,'Root##header_scale_root',app.music.roots[s.scale_root+1]) then for i,n in ipairs(app.music.roots) do if I.Selectable(c,n,i-1==s.scale_root) then s.scale_root=i-1 end end; I.EndCombo(c) end
-    I.SetNextItemWidth(c,170)
-    if I.BeginCombo(c,'Scale##header_scale_name',s.scale_name) then
-      if app.music.scale_groups then
-        for _,group in ipairs(app.music.scale_groups) do
-          if I.BeginMenu(c,group[1]) then
-            for _,name in ipairs(group[2]) do if I.Selectable(c,name,name==s.scale_name) then s.scale_name=name end end
-            I.EndMenu(c)
-          end
-        end
-      else
-        for _,name in ipairs(app.music.scale_order) do if I.Selectable(c,name,name==s.scale_name) then s.scale_name=name end end
-      end
-      I.EndCombo(c)
-    end
-    changed,s.scale_opacity=I.SliderDouble(c,'Highlight strength',s.scale_opacity or .16,.02,.40,'%.2f'); if changed then Appearance.apply(app) end
-    local color_changed,color=I.ColorEdit4(c,'Highlight color',Appearance.to_widget_color(app.theme_state.colors.scale_highlight),I.ColorEditFlags_NoAlpha|I.ColorEditFlags_NoOptions)
-    if color_changed then Suite.set_color(reaper,app.theme_state,'scale_highlight',Appearance.from_widget_color(color)); Appearance.apply(app) end
-    I.EndPopup(c)
-  end
+  if chord_hot and I.IsMouseClicked(c,I.MouseButton_Right) then Harmony.open(app) end
+  if icon('scale_options','scale','Harmony: key, scale and chord voicings',s.scale_enabled or s.scale_snap) then Harmony.open(app) end
   group_gap()
   local snap_mode=U.snap_mode(s); local snap_names={off='Off',absolute='Absolute',relative='Relative'}
   local snap_icon=snap_mode=='relative' and 'snap_relative' or 'snap_absolute'
@@ -222,8 +142,13 @@ function M.draw(app)
   if I.IsItemHovered(c) then I.SetTooltip(c,'Zoom timeline out') end
   I.SameLine(c); if I.SmallButton(c,'+##time_zoom') then app:zoom_time(.8,(app.viewport.x or 0)+(app.viewport.w or 1)*.5) end
   if I.IsItemHovered(c) then I.SetTooltip(c,'Zoom timeline in') end
+  I.SameLine(c)
+  local follow_active=s.follow_playback and not app.viewport.follow_suspended
+  local follow_icon=not s.follow_playback and 'follow_off' or (app.viewport.follow_suspended and 'follow_suspended' or (s.follow_style=='continuous' and 'follow_continuous' or 'follow_page'))
+  local follow_tip='Follow: '..app.viewport:follow_label()..'\nClick: cycle Off / Page / Continuous, or resume after manual scrolling.\nPage advances near the right edge. Continuous holds the playhead at 35% of the view.\nStop returns to the starting view; Pause keeps your place.'
+  if Icons.button(app,'playback_follow',follow_icon,follow_tip,follow_active) then app.viewport:toggle_follow() end
   local overlap_count=app.cache.overlap_count or 0
-  if overlap_count>0 then
+  if s.prevent_overlaps and overlap_count>0 then
     I.SameLine(c); if I.SmallButton(c,'Fix overlaps ('..tostring(overlap_count)..')##native_overlap_fix') then app:repair_overlaps() end
     if I.IsItemHovered(c) then I.SetTooltip(c,'Ambiguous same-channel, same-pitch overlaps detected.\nClick to open REAPER\'s native MIDI editor if needed and run Correct overlapping notes.\nThe MIDI editor will remain open afterward.') end
   end
@@ -232,12 +157,5 @@ function M.draw(app)
   main_menu(app)
 end
 
-function M.draw_chord_palette(app)
-  if not app.chord_palette_open then return end
-  local I,c=app.ImGui,app.ctx
-  I.SetNextWindowSize(c,238,150,I.Cond_FirstUseEver)
-  local visible; visible,app.chord_palette_open=I.Begin(c,'Chord Palette',app.chord_palette_open,I.WindowFlags_AlwaysAutoResize)
-  if visible then chord_controls(app) end
-  if visible then I.End(c) end
-end
+function M.draw_chord_palette(app) Harmony.draw(app) end
 return M

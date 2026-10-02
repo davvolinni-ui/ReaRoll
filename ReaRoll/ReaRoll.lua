@@ -1,9 +1,14 @@
 -- @description ReaRoll - compact sketching piano roll
--- @version 0.6.0-test
+-- @version 0.6.1-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
--- @changelog Initial ReaPack testing release.
+-- @changelog
+--   Add harmony tools and chord palettes.
+--   Expand arpeggiator and phrase editing tools.
+--   Preserve explicit note-on/off pairs when editing overlapping notes.
+--   Improve playback following, zoom focus, and timeline navigation.
+--   Refine controller lane tools, tooltips, toolbar, and MIDI audition controls.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

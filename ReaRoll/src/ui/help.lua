@@ -25,6 +25,15 @@ function M.draw(app)
         'Ctrl+wheel zooms time. Ctrl+Alt+wheel zooms pitch. Middle-drag pans.',
         'The Time/Pitch buttons and Fit actions work without keyboard modifiers.',
       }},
+      {'Velocity and controller lanes',{
+        'Drag empty controller lane space to draw or reshape points. Drag a point to move it.',
+        'Ctrl-click a point adds or removes it from the selection. Drag selected points to move them; Shift-drag duplicates.',
+        'Right-click near a controller point deletes it. Right-click empty lane space clears the selection.',
+        'Right-drag empty lane space selects a snapped musical range. Right-drag either range edge resizes it.',
+        'Drag a velocity handle to change that note or the selected notes. Drag empty space to paint velocities; hold Shift for a straight line.',
+        'Protected channel-mode lanes allow existing points to be moved or deleted, but do not allow drawing new points.',
+        'The lane header shows the position and value under the pointer. The mouse wheel in a lane does not scroll note pitches.',
+      }},
       {'Controls',{
         'Hover a value and use the wheel to adjust it. Right-click restores its shown default.',
         'Grid controls placement spacing. Len controls the inserted note duration.',
