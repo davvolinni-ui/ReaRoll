@@ -161,7 +161,15 @@ local function preview_notes(app,kind,mutate,source_notes)
   local notes={}; for _,source in ipairs(p.originals) do local n=app.cache.notes[source.index+1]; if n then notes[#notes+1]=n end end
   app.edit:begin_preview(app.take)
   mutate(notes,p)
-  app.edit:finish(); app.cache:rebuild(); app:reselect_notes(p.originals); reaper.UpdateArrange(); return true
+  -- Capture the edited transaction before finishing: cached copies and the
+  -- originals still carry the old pitch/velocity and cannot identify the
+  -- previewed notes after the cache rebuild.
+  local wanted={}
+  for _,n in ipairs(notes) do
+    local edited=app.edit.active and app.edit.active.notes[n.index+1]
+    wanted[#wanted+1]=Notes.copy_note(edited or n)
+  end
+  app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); reaper.UpdateArrange(); return true
 end
 
 function M.preview_velocity(app,mode,value,amount,pivot,first,last)

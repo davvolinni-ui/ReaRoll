@@ -1,5 +1,5 @@
 -- @description ReaRoll - Reset Window
--- @version 0.6.1-test
+-- @version 0.6.2-test
 -- @author Davvo
 -- @noindex
 -- @about Reopens a hidden or off-screen ReaRoll window without clearing preferences.

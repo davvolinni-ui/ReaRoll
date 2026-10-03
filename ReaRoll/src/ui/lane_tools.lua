@@ -43,7 +43,9 @@ end
 local function preview_footer(app)
   local I,c,T=app.ImGui,app.ctx,app.theme
   I.Spacing(c); I.Separator(c); I.Spacing(c)
-  I.BeginDisabled(c,not app.transform_preview or app.transform_preview.invalid)
+  -- A missing invalid flag is nil. ReaImGui treats nil as the optional
+  -- disabled argument's default (true), so always pass a boolean here.
+  I.BeginDisabled(c,not app.transform_preview or app.transform_preview.invalid==true)
   I.PushStyleColor(c,I.Col_Button,T.accent)
   if I.Button(c,'Apply',120,0) then app.transforms.commit_preview(app); app.lane_phrase_preview=nil; I.CloseCurrentPopup(c) end
   I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
