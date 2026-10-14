@@ -1,3 +1,4 @@
+-- @noindex
 local Shortcuts=require 'src.shortcuts'
 local Mouse=require 'src.mouse'
 local Canvas=require 'src.ui.canvas'

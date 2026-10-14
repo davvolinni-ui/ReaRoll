@@ -1,3 +1,4 @@
+-- @noindex
 local V=require 'src.viewport'
 local now=0
 reaper={time_precise=function() return now end,MIDI_GetPPQPosFromProjQN=function(_,q) return q*960 end}

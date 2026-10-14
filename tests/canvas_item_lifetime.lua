@@ -1,3 +1,4 @@
+-- @noindex
 local Take=require 'src.take'
 local Canvas=require 'src.ui.canvas'
 local bounds
