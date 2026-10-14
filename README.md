@@ -17,6 +17,12 @@ ReaRoll is a compact piano roll for sketching MIDI ideas in REAPER. This is a te
 
 The package also installs **ReaRoll - Reset Window** for recovering a hidden or off-screen window. ReaRoll remains a testing release until it is proven stable. Updates are delivered through ReaPack synchronization.
 
+## Input presets
+
+Open **Setup > Shortcuts and mouse modifiers** to choose **ReaRoll Default**, **REAPER**, **FL Studio**, or **Ableton Live**. Applying a preset replaces keyboard and note-grid mouse bindings; individual edits become **Custom**. Existing saved shortcuts are preserved until you choose a preset.
+
+Presets adapt familiar Windows controls to supported ReaRoll actions. Wheel navigation, controller lanes, and DAW-specific features retain ReaRoll behavior. See [input preset details](docs/INPUT_PRESETS.md).
+
 ## Support and license
 
 Report issues in the [ReaRoll forum thread](https://forum.cockos.com/showthread.php?t=311021).

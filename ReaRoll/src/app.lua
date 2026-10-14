@@ -305,7 +305,7 @@ function App:frame()
     Toolbar.draw(self); I.Separator(c)
     if self.take then
       local width,height=I.GetContentRegionAvail(c)
-      local sources_width=self.sources_open and math.min(174*ui_scale,math.max(148*ui_scale,width*.15)) or 0
+      local sources_width=self.sources_open and math.min(148*ui_scale,math.max(132*ui_scale,width*.12)) or 0
       local spacing=(self.sources_open and 7*ui_scale or 0)
       if self.sources_open then
         draw_child(I,c,'##midi_sources_panel',sources_width,height,function() Sources.draw(self) end); I.SameLine(c)

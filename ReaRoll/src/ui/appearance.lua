@@ -105,6 +105,15 @@ function M.draw(app)
     if I.BeginTabBar(c,'##theme_tabs') then
       if I.BeginTabItem(c,'General') then
         I.Text(c,'Theme behavior')
+        local scroll_changed; scroll_changed,app.settings.smooth_scroll=I.Checkbox(c,'Smooth wheel scrolling and zoom',app.settings.smooth_scroll)
+        if I.IsItemHovered(c) then I.SetTooltip(c,'Ease wheel scrolling and modifier-wheel zoom. Dragging stays direct.') end
+        if scroll_changed then app.viewport:cancel_scroll() end
+        if app.settings.smooth_scroll then
+          I.SetNextItemWidth(c,220)
+          local glide_changed; glide_changed,app.settings.scroll_glide_ms=I.SliderDouble(c,'Scroll glide length',app.settings.scroll_glide_ms or 200,60,400,'%.0f ms')
+          Controls.number(app,app.settings,'scroll_glide_ms',200,10,60,400,'Scroll glide length')
+          if I.IsItemHovered(c) then I.SetTooltip(c,'Shorter feels snappier; longer feels gentler. Default: 200 ms.') end
+        end
         I.TextDisabled(c,'Colors are checked automatically for readable contrast.')
         local ui_changed; ui_changed,app.settings.ui_scale=I.SliderDouble(c,'Interface size',app.settings.ui_scale or 1,.80,1.50,'%.2fx')
         ui_changed=Controls.number(app,app.settings,'ui_scale',1,.05,.80,1.50,'Interface size') or ui_changed

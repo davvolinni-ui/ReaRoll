@@ -1,5 +1,6 @@
 -- @noindex
 local M={}
+local Mouse=require 'src.mouse'
 function M.draw(app)
   if not app.help_open then return end
   local I,c=app.ImGui,app.ctx
@@ -9,15 +10,15 @@ function M.draw(app)
     I.TextColored(c,app.theme.note,'ReaRoll 0.4 improvement preview'); I.Separator(c)
     local sections={
       {'Create and edit',{
-        'Smart: click empty grid to insert; drag while inserting to choose its end.',
+        Mouse.value(app.settings,'empty')=='Marquee' and 'Smart: drag empty grid to select; double-click empty grid to insert. Paint draws directly.' or 'Smart: click empty grid to insert; drag while inserting to choose its end.',
         'Drag a note body to move it. Drag either edge to resize it.',
-        'Shift-drag clones. Right-click/drag from a note erases; Alt+right-click opens note actions.',
-        'Paint draws notes. Slice click/drag paints cuts; Alt bypasses snap. Glue click/drag removes touched note seams.',
+        Mouse.value(app.settings,'clone')..'-drag clones. Right-click note: '..Mouse.value(app.settings,'right_note')..'. Double-click note: '..Mouse.value(app.settings,'double_note')..'.',
+        'Paint draws notes. Slice click/drag paints cuts; '..Mouse.value(app.settings,'unsnap')..' bypasses snap. Glue click/drag removes touched note seams.',
         'Ctrl+Shift+wheel changes the number of equal divisions across selected note runs.',
       }},
       {'Select',{
-        'Ctrl-click toggles a note; Ctrl+Shift adds to the selection.',
-        'Ctrl-drag empty grid selects; Ctrl+Shift-drag adds. Right-drag empty grid is also a marquee.',
+        Mouse.value(app.settings,'select')..'-click toggles a note; Ctrl+Shift adds to the selection.',
+        Mouse.value(app.settings,'marquee')..'-drag empty grid selects. Right-drag empty grid is also a marquee.',
         'Select mode uses ordinary left-drag for marquee selection. Ctrl+A selects all. Note selection is local to ReaRoll.',
       }},
       {'Navigate',{
@@ -38,7 +39,7 @@ function M.draw(app)
         'Hover a value and use the wheel to adjust it. Right-click restores its shown default.',
         'Grid controls placement spacing. Len controls the inserted note duration.',
         'Ctrl+Z / Ctrl+Shift+Z undo and redo. Delete removes selected notes. Space controls playback.',
-        'Setup > Keyboard shortcuts reassigns or disables ReaRoll commands.',
+        'Setup > Shortcuts and mouse modifiers offers ReaRoll, REAPER, FL Studio and Ableton Live presets, plus custom bindings.',
       }},
     }
     for _,section in ipairs(sections) do

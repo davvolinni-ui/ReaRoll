@@ -1,5 +1,6 @@
 -- @noindex
 local M={}
+local Mouse=require 'src.mouse'
 
 M.defaults={
   select_all='Ctrl+A',deselect='Ctrl+D',copy='Ctrl+C',cut='Ctrl+X',paste='Ctrl+V',duplicate='Ctrl+B',
@@ -9,7 +10,7 @@ M.defaults={
   length_shorter='Shift+LeftArrow',length_longer='Shift+RightArrow',octave_up='Shift+UpArrow',octave_down='Shift+DownArrow',velocity_up='Ctrl+UpArrow',velocity_down='Ctrl+DownArrow',
   duplicate_octave_up='Ctrl+Shift+UpArrow',duplicate_octave_down='Ctrl+Shift+DownArrow',
   reaper_action_1='None',reaper_action_2='None',reaper_action_3='None',reaper_action_4='None',
-  tool_smart='P',tool_paint='B',tool_select='E',tool_slice='C',tool_mute='T',tool_chord='S',
+  tool_smart='P',tool_paint='B',tool_select='E',tool_slice='C',tool_mute='T',tool_chord='S',draw_mode='None',
 }
 M.labels={
   select_all='Select all',deselect='Deselect',copy='Copy',cut='Cut',paste='Paste',duplicate='Duplicate to right',undo='Undo',redo='Redo',delete='Delete',cancel='Cancel / deselect',play='Play / pause',
@@ -18,21 +19,57 @@ M.labels={
   length_shorter='Shorten by grid',length_longer='Lengthen by grid',octave_up='Transpose octave up',octave_down='Transpose octave down',velocity_up='Velocity up',velocity_down='Velocity down',
   duplicate_octave_up='Duplicate octave up',duplicate_octave_down='Duplicate octave down',
   reaper_action_1='Run REAPER action 1',reaper_action_2='Run REAPER action 2',reaper_action_3='Run REAPER action 3',reaper_action_4='Run REAPER action 4',
-  tool_smart='Smart tool',tool_paint='Paint tool',tool_select='Select tool',tool_slice='Slice tool',tool_mute='Mute tool',tool_chord='Chord tool',
+  tool_smart='Smart tool',tool_paint='Paint tool',tool_select='Select tool',tool_slice='Slice tool',tool_mute='Mute tool',tool_chord='Chord tool',draw_mode='Toggle draw mode',
 }
 M.order={'select_all','deselect','copy','cut','paste','duplicate','duplicate_octave_up','duplicate_octave_down','undo','redo','delete','cancel','play','quantize','legato','snap','fit_width','fit_height','fit_selection','zoom_in','zoom_out','nudge_left','nudge_right','pitch_up','pitch_down','length_shorter','length_longer','octave_up','octave_down','velocity_up','velocity_down','tool_smart','tool_paint','tool_select','tool_slice','tool_mute','tool_chord','reaper_action_1','reaper_action_2','reaper_action_3','reaper_action_4'}
 M.choices={'None','Space','Delete','Escape','Backspace','PageUp','PageDown','LeftArrow','RightArrow','UpArrow','DownArrow','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','Shift+LeftArrow','Shift+RightArrow','Shift+UpArrow','Shift+DownArrow','Ctrl+UpArrow','Ctrl+DownArrow','Ctrl+Shift+UpArrow','Ctrl+Shift+DownArrow','Ctrl+A','Ctrl+B','Ctrl+C','Ctrl+D','Ctrl+E','Ctrl+F','Ctrl+G','Ctrl+H','Ctrl+I','Ctrl+J','Ctrl+K','Ctrl+L','Ctrl+M','Ctrl+N','Ctrl+O','Ctrl+P','Ctrl+Q','Ctrl+R','Ctrl+S','Ctrl+T','Ctrl+U','Ctrl+V','Ctrl+W','Ctrl+X','Ctrl+Y','Ctrl+Z','Ctrl+Shift+Z'}
 
+table.insert(M.order,'draw_mode')
+for _,binding in ipairs({'Q','Alt+Q','Alt+L','Alt+S','Ctrl+4','Ctrl+R','Ctrl+Shift+A','Shift+D'}) do
+  local found=false; for _,choice in ipairs(M.choices) do if choice==binding then found=true end end
+  if not found then M.choices[#M.choices+1]=binding end
+end
+M.preset_order={'default','reaper','fl','live'}
+M.presets={
+  default={label='ReaRoll Default',keys={},mouse={}},
+  reaper={label='REAPER',keys={duplicate='Ctrl+D',deselect='None',quantize='Q',snap='Alt+S'},mouse={clone='Ctrl',select='Shift',unsnap='Shift',right_note='Marquee',double_note='Erase'}},
+  fl={label='FL Studio',keys={quantize='Ctrl+Q',legato='Ctrl+L',redo='Ctrl+Y',nudge_left='Shift+LeftArrow',nudge_right='Shift+RightArrow',length_shorter='None',length_longer='None'},mouse={marquee='Ctrl'}},
+  live={label='Ableton Live',keys={duplicate='Ctrl+D',deselect='Ctrl+Shift+A',snap='Ctrl+4',draw_mode='B',tool_paint='None',tool_select='None',tool_slice='E',zoom_in='None',zoom_out='None'},mouse={clone='Ctrl',select='Shift',marquee='Shift',right_note='Actions',double_note='Erase',empty='Marquee'}},
+}
+function M.apply_preset(settings,id)
+  local preset=M.presets[id]; if not preset then return false end
+  settings.shortcuts={}; settings.mouse={}
+  for action,binding in pairs(M.defaults) do settings.shortcuts[action]=binding end
+  -- A preset override owns its binding; inherited commands must not fire too.
+  for action,binding in pairs(preset.keys) do
+    if binding~='None' then for other,value in pairs(settings.shortcuts) do if other~=action and value==binding then settings.shortcuts[other]='None' end end end
+    settings.shortcuts[action]=binding
+  end
+  for key,value in pairs(Mouse.defaults) do settings.mouse[key]=preset.mouse[key] or value end
+  settings.input_preset=id
+  return true
+end
 function M.load(settings)
   settings.shortcuts={}; local schema=tonumber(reaper.GetExtState('ReaRoll','shortcut_schema')) or 0
   for action,default in pairs(M.defaults) do
     local value=reaper.GetExtState('ReaRoll','shortcut_'..action)
     settings.shortcuts[action]=schema>=2 and value~='' and value or default
   end
+  settings.mouse={}
+  for key,default in pairs(Mouse.defaults) do
+    local value=reaper.GetExtState('ReaRoll','mouse_'..key); local valid=false
+    for _,choice in ipairs(Mouse.choices[key]) do if choice==value then valid=true end end
+    settings.mouse[key]=valid and value or default
+  end
+  local id=reaper.GetExtState('ReaRoll','input_preset')
+  settings.input_preset=(M.presets[id] or id=='custom') and id or 'custom'
+  if id=='' and schema<2 then settings.input_preset='default' end
 end
 function M.save(settings)
   reaper.SetExtState('ReaRoll','shortcut_schema','2',true)
   for action,default in pairs(M.defaults) do reaper.SetExtState('ReaRoll','shortcut_'..action,settings.shortcuts[action] or default,true) end
+  for key in pairs(Mouse.defaults) do reaper.SetExtState('ReaRoll','mouse_'..key,Mouse.value(settings,key),true) end
+  reaper.SetExtState('ReaRoll','input_preset',settings.input_preset or 'custom',true)
 end
 local function parse(binding)
   local ctrl,shift,alt=false,false,false; local key

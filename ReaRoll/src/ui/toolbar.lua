@@ -22,7 +22,7 @@ local function main_menu(app)
     end
     I.Separator(c)
     if I.MenuItem(c,'Appearance...') then app.appearance_open=true end
-    if I.MenuItem(c,'Keyboard shortcuts...') then app.shortcuts_open=true end
+    if I.MenuItem(c,'Shortcuts and mouse modifiers...') then app.shortcuts_open=true end
     local changed; changed,s.midi_preview_enabled=I.Checkbox(c,'MIDI note preview',s.midi_preview_enabled)
     if changed and not s.midi_preview_enabled then app.audition:stop() end
     if I.IsItemHovered(c) then I.SetTooltip(c,'Audition notes while drawing, moving, painting, or clicking the piano keyboard.') end

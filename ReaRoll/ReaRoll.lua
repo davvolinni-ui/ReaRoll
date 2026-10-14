@@ -1,11 +1,13 @@
 -- @description ReaRoll - compact sketching piano roll
--- @version 0.6.2-test
+-- @version 0.6.3-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Fix disabled Apply buttons across the bottom toolbar's note tools.
---   Preserve selected notes after pitch, velocity, and humanize previews.
+--   Add ReaRoll, REAPER, FL Studio, and Ableton Live input presets.
+--   Add customizable note-grid mouse modifiers and a draw-mode shortcut.
+--   Add configurable smooth wheel scrolling and anchored wheel zoom.
+--   Improve MIDI take validation and editor interaction handling.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

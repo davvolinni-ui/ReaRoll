@@ -15,6 +15,14 @@ function M.item(take)
   local ok,item=pcall(reaper.GetMediaItemTake_Item,take)
   return ok and item or nil
 end
+function M.track(take)
+  local item=M.item(take)
+  if not item then return nil end
+  if reaper.ValidatePtr2 and not reaper.ValidatePtr2(0,item,'MediaItem*') then return nil end
+  -- The owning item can disappear after resolving the take's item pointer.
+  local ok,track=pcall(reaper.GetMediaItemTrack,item)
+  return ok and track or nil
+end
 function M.active(preferred)
   -- Arrange selection is the public source of truth, so selecting an item on
   -- the timeline immediately changes ReaRoll's editable take.
