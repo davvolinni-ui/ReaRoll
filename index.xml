@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReaRoll" commit="6ae849d814a92fabd7669506a2388937e198e963">
+<index version="1" name="ReaRoll" commit="26216135a5bc7cf49eee4a6e815930a5e2e2313f">
   <category name="ReaRoll">
     <reapack name="ReaRoll.lua" type="script" desc="ReaRoll - compact sketching piano roll">
       <metadata>
@@ -133,6 +133,50 @@ Preserve selected notes after pitch, velocity, and humanize previews.]]></change
         <source main="main" file="ReaRoll_Reset_Window.lua">https://github.com/davvolinni-ui/ReaRoll/raw/6ae849d814a92fabd7669506a2388937e198e963/ReaRoll/ReaRoll_Reset_Window.lua</source>
         <source file="EULA.md">https://github.com/davvolinni-ui/ReaRoll/raw/6ae849d814a92fabd7669506a2388937e198e963/ReaRoll/EULA.md</source>
       </version>
+      <version name="0.6.3-test" author="Davvo" time="2026-10-14T23:51:28Z">
+        <changelog><![CDATA[Add ReaRoll, REAPER, FL Studio, and Ableton Live input presets.
+Add customizable note-grid mouse modifiers and a draw-mode shortcut.
+Add configurable smooth wheel scrolling and anchored wheel zoom.
+Improve MIDI take validation and editor interaction handling.]]></changelog>
+        <source main="main">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/ReaRoll.lua</source>
+        <source file="src/app.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/app.lua</source>
+        <source file="src/arpeggiator.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/arpeggiator.lua</source>
+        <source file="src/audition.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/audition.lua</source>
+        <source file="src/cc_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/cc_cache.lua</source>
+        <source file="src/chord_palettes.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/chord_palettes.lua</source>
+        <source file="src/clipboard.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/clipboard.lua</source>
+        <source file="src/ghost_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ghost_cache.lua</source>
+        <source file="src/grid.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/grid.lua</source>
+        <source file="src/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/key_map.lua</source>
+        <source file="src/midi_cache.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/midi_cache.lua</source>
+        <source file="src/midi_edit.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/midi_edit.lua</source>
+        <source file="src/mouse.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/mouse.lua</source>
+        <source file="src/music.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/music.lua</source>
+        <source file="src/note_events.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/note_events.lua</source>
+        <source file="src/selection.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/selection.lua</source>
+        <source file="src/settings.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/settings.lua</source>
+        <source file="src/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/shortcuts.lua</source>
+        <source file="src/suite_theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/suite_theme.lua</source>
+        <source file="src/take.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/take.lua</source>
+        <source file="src/theme.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/theme.lua</source>
+        <source file="src/transforms.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/transforms.lua</source>
+        <source file="src/util.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/util.lua</source>
+        <source file="src/viewport.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/viewport.lua</source>
+        <source file="src/ui/appearance.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/appearance.lua</source>
+        <source file="src/ui/canvas.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/canvas.lua</source>
+        <source file="src/ui/controls.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/controls.lua</source>
+        <source file="src/ui/harmony.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/harmony.lua</source>
+        <source file="src/ui/help.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/help.lua</source>
+        <source file="src/ui/icons.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/icons.lua</source>
+        <source file="src/ui/key_map.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/key_map.lua</source>
+        <source file="src/ui/lane_tools.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/lane_tools.lua</source>
+        <source file="src/ui/phrase.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/phrase.lua</source>
+        <source file="src/ui/shortcuts.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/shortcuts.lua</source>
+        <source file="src/ui/sources.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/sources.lua</source>
+        <source file="src/ui/toolbar.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/src/ui/toolbar.lua</source>
+        <source main="main" file="ReaRoll_Reset_Window.lua">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/ReaRoll_Reset_Window.lua</source>
+        <source file="EULA.md">https://github.com/davvolinni-ui/ReaRoll/raw/26216135a5bc7cf49eee4a6e815930a5e2e2313f/ReaRoll/EULA.md</source>
+      </version>
     </reapack>
   </category>
   <metadata>
@@ -152,6 +196,12 @@ Preserve selected notes after pitch, velocity, and humanize previews.]]></change
 {\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Synchronize packages, then install {\b ReaRoll}.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Run {\b ReaRoll - compact sketching piano roll} from the Action List.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 The package also installs {\b ReaRoll - Reset Window} for recovering a hidden or off-screen window. ReaRoll remains a testing release until it is proven stable. Updates are delivered through ReaPack synchronization.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Input presets\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Open {\b Setup > Shortcuts and mouse modifiers} to choose {\b ReaRoll Default}, {\b REAPER}, {\b FL Studio}, or {\b Ableton Live}. Applying a preset replaces keyboard and note-grid mouse bindings; individual edits become {\b Custom}. Existing saved shortcuts are preserved until you choose a preset.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Presets adapt familiar Windows controls to supported ReaRoll actions. Wheel navigation, controller lanes, and DAW-specific features retain ReaRoll behavior. See {\field{\*\fldinst{HYPERLINK "docs/INPUT_PRESETS.md"}}{\fldrslt{\ul
+input preset details
+}}}
+.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Support and license\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Report issues in the {\field{\*\fldinst{HYPERLINK "https://forum.cockos.com/showthread.php?t=311021"}}{\fldrslt{\ul
 ReaRoll forum thread
