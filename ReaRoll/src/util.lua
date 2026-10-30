@@ -32,14 +32,19 @@ function M.track_color(track,fallback)
 end
 function M.mods(ImGui,ctx)
   local b=ImGui.GetKeyMods(ctx)
-  -- Use the physical Windows modifier state whenever available. ReaImGui can
-  -- retain a Ctrl/Shift bit after focus moves through an auxiliary window,
-  -- which turns an ordinary draw click into a marquee-selection gesture.
-  -- This also keeps wheel modifiers working over an unfocused dock.
-  if reaper.JS_Mouse_GetState then
-    local physical=reaper.JS_Mouse_GetState(28)
-    return {ctrl=(physical&4)~=0,shift=(physical&8)~=0,alt=(physical&16)~=0}
-  end
+  -- Keep modifiers in the same input stream as ReaImGui mouse/key events.
   return {ctrl=(b&ImGui.Mod_Ctrl)~=0,shift=(b&ImGui.Mod_Shift)~=0,alt=(b&ImGui.Mod_Alt)~=0}
+end
+-- Call only while handling a wheel event over ReaRoll. Do not change focus
+-- or replace the modifier state used by clicks, gestures or shortcuts.
+function M.wheel_mods(ImGui,ctx)
+  local mods=M.mods(ImGui,ctx)
+  local os=reaper.GetOS and reaper.GetOS() or ''
+  if not (os:match('^Win') or os:match('^OSX') or os:match('^macOS')) or not reaper.JS_Mouse_GetState then return mods end
+  if not ImGui.IsWindowHovered(ctx) or ImGui.IsWindowFocused(ctx,ImGui.FocusedFlags_AnyWindow or 0) then return mods end
+  local physical=reaper.JS_Mouse_GetState(28)
+  -- JS uses gfx.mouse_cap masks: 4 is Ctrl on Windows, Command on macOS;
+  -- 8 is Shift and 16 is Alt/Option on both platforms.
+  return {ctrl=(physical&4)~=0,shift=(physical&8)~=0,alt=(physical&16)~=0}
 end
 return M

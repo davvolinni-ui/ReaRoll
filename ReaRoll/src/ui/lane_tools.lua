@@ -312,6 +312,18 @@ local function defaults(app,def)
   return o
 end
 
+local function shape_footer(app)
+  local I,c=app.ImGui,app.ctx
+  I.Spacing(c); I.Separator(c); I.Spacing(c)
+  if app.transform_notice then I.TextWrapped(c,app.transform_notice)end
+  local p=app.lane_tool_preview
+  local disabled=not p or ((p.multi_controller==true or p.multi_notes==true) and p.valid~=true)
+  I.BeginDisabled(c,disabled); I.PushStyleColor(c,I.Col_Button,app.theme.accent)
+  if I.Button(c,'Apply',120,0) and M.apply(app) then I.CloseCurrentPopup(c) end
+  I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
+  if I.Button(c,'Cancel',100,0) then M.cancel(app); I.CloseCurrentPopup(c) end
+end
+
 local function shape_popup(app,def)
   local I,c=app.ImGui,app.ctx; local o=defaults(app,def); local changed=false
   I.TextColored(c,app.theme.accent,'Shape / '..def.label)
@@ -373,12 +385,7 @@ local function shape_popup(app,def)
     if I.IsItemHovered(c) then I.SetTooltip(c,'Preview of the value shape. LFO rate is synchronized in musical quarter-note time and anchored to the MIDI item start.') end
   end
   if changed or not app.lane_tool_preview then preview(app,def,o.mode,o) end
-  I.Spacing(c); I.Separator(c); I.Spacing(c)
-  if app.transform_notice then I.TextWrapped(c,app.transform_notice)end
-  I.BeginDisabled(c,not app.lane_tool_preview or (app.lane_tool_preview.multi_controller or app.lane_tool_preview.multi_notes) and not app.lane_tool_preview.valid); I.PushStyleColor(c,I.Col_Button,app.theme.accent)
-  if I.Button(c,'Apply',120,0) then M.apply(app); I.CloseCurrentPopup(c) end
-  I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
-  if I.Button(c,'Cancel',100,0) then M.cancel(app); I.CloseCurrentPopup(c) end
+  shape_footer(app)
 end
 
 local function prepare_note_tool(app)

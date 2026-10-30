@@ -1716,6 +1716,7 @@ function C.draw(app)
   if navigation_hovered and not app.control_wheel_consumed then
     local wheel=I.GetMouseWheel(c)
     if wheel~=0 and not app.gesture then
+      local mods=U.wheel_mods(I,c)
       if mods.ctrl and mods.shift then if Selection.count(app.selection)>0 then divide_selection(app,wheel>0 and 1 or -1) else v:wheel_scroll(wheel*50,0) end
       elseif mods.alt and not mods.ctrl and hover then adjust_note_property(app,hover,wheel)
       elseif mods.ctrl and mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my)
@@ -1773,7 +1774,7 @@ function C.draw(app)
     local pitch=v:pitch_from_y(my);local name=app.note_label and app:note_label(pitch)
     if name then I.SetTooltip(c,name..'\nMIDI pitch '..pitch..' / channel '..((s.channel or 0)+1))end
     local wheel=I.GetMouseWheel(c)
-    if wheel~=0 then if mods.ctrl or mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my) else v:wheel_scroll(0,wheel*3) end end
+    if wheel~=0 then local wheel_mods=U.wheel_mods(I,c);if wheel_mods.ctrl or wheel_mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my) else v:wheel_scroll(0,wheel*3) end end
   end
   if I.IsItemHovered(c) and not phrase_popup_open and app.key_mapping_mode and I.IsMouseClicked(c,I.MouseButton_Left) then
     local pitch=v:pitch_from_y(my); local selected=app.key_map_selection
@@ -2138,6 +2139,7 @@ function C.draw_empty(app,track)
   if I.IsItemHovered(c) then
     local mx,my=I.GetMousePos(c); local mods=U.mods(I,c); local wheel=I.GetMouseWheel(c)
     if wheel~=0 then
+      mods=U.wheel_mods(I,c)
       if mods.ctrl then
         local anchor=s.start_qn+(mx-gx)/gw*s.visible_qn; local ratio=(mx-gx)/gw; local wanted=U.clamp(s.visible_qn*(wheel>0 and .82 or 1.22),1/16,256); s.start_qn=math.max(0,anchor-ratio*wanted); s.visible_qn=wanted
       elseif mods.shift then s.start_qn=math.max(0,s.start_qn-wheel*s.visible_qn*.1)
