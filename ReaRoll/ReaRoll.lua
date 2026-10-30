@@ -1,16 +1,13 @@
 -- @description ReaRoll - MIDI piano roll
--- @version 0.7.0-test
+-- @version 0.7.1-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Add overlap-driven mono glides and independent MPE chord glides.
---   Add MPE voice allocation, per-note expression and multi-note curve editing.
---   Edit multiple MIDI items in the original piano roll.
---   Rework chord palettes, note painting, controller lanes and editing tools.
---   Preserve controller and sustain context during supported note edits.
---   Refine compact toolbars, mouse tooltips and floating-window recall.
---   Fix note drawing, resizing and glide playback at MIDI item boundaries.
+--   Fix Shape velocity selection across editable MIDI channels and multiple items.
+--   Retain selected notes during Shape previews, Apply and Cancel.
+--   Clear stale Shape errors after a successful preview.
+--   Start the empty piano roll at project zero instead of a previous item's scroll position.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

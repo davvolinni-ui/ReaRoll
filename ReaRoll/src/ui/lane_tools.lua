@@ -18,7 +18,7 @@ end
 
 local function target(app)
   local s=app.settings; local id=s.lane_target
-  if app.multi_edit_mode and app.controller_point_context then
+  if app.multi_edit_mode and app.controller_point_context and app.multi_controller_point_focus then
     local lane=app.controller_point_context.lane
     return {id=lane.id,label=lane.label,minimum=0,maximum=lane.pitch and 16383 or 127,status=lane.pitch and 0xE0 or lane.status or 0xB0,cc=lane.cc,pitch=lane.pitch,switch=lane.switch,protected=lane.protected or lane.discrete}
   end
@@ -112,7 +112,7 @@ local function collect(app,def,resolution)
   local scope,first,last,chosen_notes=automatic_scope(app); local out={}
   if last<first then return out end
   if def.note then
-    for _,n in ipairs(app.cache:get(false)) do if (n.chan or 0)==(s.channel or 0) then
+    for _,n in ipairs(app.cache:get(false)) do if s.edit_all_channels~=false or (n.chan or 0)==(s.channel or 0) then
       local q=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s)
       if q>=item_start and q<=item_end then out[#out+1]={index=n.index,ppq=n.s,qn=q,value=n.vel,id=n.id} end
     end end
@@ -196,10 +196,16 @@ local function delete_replaced_events(app,indices)
   for _,index in ipairs(indices or {}) do reaper.MIDI_DeleteCC(app.take,index) end
 end
 
+local function retain_shape_selection(app,p)
+  if not p.selected_indices then return end
+  Selection.clear(app.selection)
+  for _,n in ipairs(app.cache:get(false))do if p.selected_indices[n.index]then Selection.add(app.selection,n.id)end end
+end
+
 local function restore(app)
   local p=app.lane_tool_preview; if not p then return false end
   if p.take and reaper.ValidatePtr2(0,p.take,'MediaItem_Take*') then reaper.MIDI_SetAllEvts(p.take,p.raw); reaper.MIDI_Sort(p.take); Notes.set_pairing_state(p.take,p.pairing_state) end
-  app.cache:invalidate(); app.cache:rebuild(); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange()
+  app.cache:invalidate(); app.cache:rebuild(); retain_shape_selection(app,p); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange()
   return true
 end
 
@@ -227,6 +233,7 @@ end
 
 function M.cancel(app,chase_audio)
   local p=app.lane_tool_preview; if not p then return false end
+  if p.multi_notes then local ok=require('src.multi_notes').cancel(app);app.lane_tool_preview=nil;return ok end
   if p.multi_controller then
     local ok=require('src.multi_lane_shape').cancel(app)
     if chase_audio~=false and reaper.GetPlayState and reaper.GetPlayPosition and reaper.SetEditCurPos and(reaper.GetPlayState()&1)==1 then reaper.SetEditCurPos(reaper.GetPlayPosition(),false,true)end
@@ -246,32 +253,46 @@ end
 
 local function preview(app,def,mode,options)
   if not app.multi_edit_mode and not def.note and require('src.overlap_mode').state(app)then app.transform_notice='Disable Overlap Glide before using controller generators; note editing and direct controller edits remain available.';return false end
+  if app.multi_edit_mode and def.note then
+    local Model=require('src.multi_notes')
+    local ok,notice=Model.begin(app);if not ok then app.transform_notice=notice;return false end
+    local items={}
+    for _,n in ipairs(app.multi_notes.transaction.items)do items[#items+1]={index=n.key,ppq=n.s*960,qn=n.s}end
+    table.sort(items,function(a,b)return a.ppq<b.ppq end)
+    local copied={};for k,v in pairs(options)do copied[k]=v end
+    if mode=='lfo' and copied.sync_qn then copied._sync_origin_ppq=0;copied._sync_ppq=copied.sync_qn*960 end
+    ok,notice=Model.preview(app,'velocity_values',calculated(items,mode,copied,def))
+    app.lane_tool_preview={multi_notes=true,def=def,valid=ok};app.transform_notice=notice;return ok
+  end
   if app.multi_edit_mode then local ok,notice=require('src.multi_lane_shape').preview(app,def,mode,options);app.transform_notice=notice;return ok end
   if app.transform_preview then app.transforms.cancel_preview(app) end
   local scope,first,last=automatic_scope(app); local signature=def.id..':'..(app.settings.channel or 0)..':'..scope..':'..string.format('%.6f:%.6f',first,last); local resolution=options.resolution or .125
-  if app.lane_tool_preview and not app.lane_tool_preview.multi_controller and app.lane_tool_preview.signature~=signature then M.cancel(app,false) end
+  if app.lane_tool_preview and not app.lane_tool_preview.multi_controller and not app.lane_tool_preview.multi_notes and app.lane_tool_preview.signature~=signature then M.cancel(app,false) end
   if app.lane_tool_preview and app.lane_tool_preview.resolution~=resolution then M.cancel(app,false) end
   if not app.lane_tool_preview then
     local ok,raw=reaper.MIDI_GetAllEvts(app.take,''); if not ok then return false end
     local items,deletes=collect(app,def,resolution); if #items==0 then app.transform_notice='No events are available for Shape in the current target.'; return false end
+    local selected_indices
+    if def.note then selected_indices={};for _,n in ipairs(Selection.list(app.selection,app.cache:get(false)))do selected_indices[n.index]=true end end
     reaper.Undo_BeginBlock2(0)
-    app.lane_tool_preview={take=app.take,raw=raw,pairing_state=Notes.get_pairing_state(app.take),signature=signature,resolution=resolution,items=items,deletes=deletes,def=def,mode=mode,undo_open=true}
+    app.lane_tool_preview={take=app.take,raw=raw,pairing_state=Notes.get_pairing_state(app.take),signature=signature,resolution=resolution,items=items,deletes=deletes,def=def,mode=mode,undo_open=true,selected_indices=selected_indices}
   end
   if mode=='lfo' and options.sync_qn then
     local origin=app.item_start_qn or 0; options._sync_origin_ppq=reaper.MIDI_GetPPQPosFromProjQN(app.take,origin)
     options._sync_ppq=math.abs(reaper.MIDI_GetPPQPosFromProjQN(app.take,origin+options.sync_qn)-options._sync_origin_ppq)
   end
   local p=app.lane_tool_preview; restore(app); p.mode=mode; p.options=options; p.values=calculated(p.items,mode,options,def); delete_replaced_events(app,p.deletes); write_values(app,def,p.values,p.items)
-  reaper.MIDI_Sort(app.take); app.cache:invalidate(); app.cache:rebuild(); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange(); return true
+  reaper.MIDI_Sort(app.take); app.cache:invalidate(); app.cache:rebuild(); retain_shape_selection(app,p); app.cc_cache:invalidate(); app.cc_cache:rebuild(); app.transform_notice=nil; reaper.UpdateArrange(); return true
 end
 M.preview=preview
 
 function M.apply(app)
   local p=app.lane_tool_preview; if not p then return false end
+  if p.multi_notes then local ok,notice=require('src.multi_notes').commit(app,'ReaRoll: shape velocity');app.lane_tool_preview=nil;app.transform_notice=notice;return ok end
   if p.multi_controller then local ok,notice=require('src.multi_lane_shape').apply(app);app.transform_notice=notice;return ok end
   restore(app); reaper.MIDI_DisableSort(app.take); delete_replaced_events(app,p.deletes); write_values(app,p.def,p.values,p.items); reaper.MIDI_Sort(app.take)
   if p.undo_open then reaper.Undo_EndBlock2(0,'ReaRoll: shape '..p.def.label,-1) end
-  app.lane_tool_preview=nil; app.cache:invalidate(); app.cache:rebuild(); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange(); return true
+  app.lane_tool_preview=nil; app.cache:invalidate(); app.cache:rebuild(); retain_shape_selection(app,p); app.cc_cache:invalidate(); app.cc_cache:rebuild(); reaper.UpdateArrange(); return true
 end
 
 local function defaults(app,def)
@@ -294,10 +315,11 @@ end
 local function shape_popup(app,def)
   local I,c=app.ImGui,app.ctx; local o=defaults(app,def); local changed=false
   I.TextColored(c,app.theme.accent,'Shape / '..def.label)
-  local scope_target=app.multi_edit_mode and((app.lane_tool_preview and app.lane_tool_preview.target)or require('src.multi_lane_shape').scope(app))
-  I.Spacing(c); I.TextDisabled(c,'LIVE PREVIEW  /  Channel '..tostring((scope_target and scope_target.ch or app.settings.channel or 0)+1));if scope_target then I.TextWrapped(c,scope_target.name..' / '..scope_target.label)end;I.Separator(c)
+  local scope_target=app.multi_edit_mode and not def.note and((app.lane_tool_preview and app.lane_tool_preview.target)or require('src.multi_lane_shape').scope(app))
+  I.Spacing(c); I.TextDisabled(c,def.note and 'LIVE PREVIEW  /  Note velocity' or ('LIVE PREVIEW  /  Channel '..tostring((scope_target and scope_target.ch or app.settings.channel or 0)+1)));if scope_target then I.TextWrapped(c,scope_target.name..' / '..scope_target.label)end;I.Separator(c)
   if def.protected then I.TextWrapped(c,'This MIDI message type is protected from generated automation. Choose Velocity, Pitch Bend, Pressure, or a normal CC lane.'); if I.Button(c,'Close') then I.CloseCurrentPopup(c) end; return end
   local scope=automatic_scope(app)
+  if app.multi_edit_mode and def.note then I.TextDisabled(c,'Target: selected notes across items')end
   if not app.multi_edit_mode then I.TextDisabled(c,scope=='range' and 'Target: selected range' or scope=='notes' and 'Target: selected notes' or 'Target: entire MIDI item')end
   for index,name in ipairs({'curve','lfo','step'}) do if index>1 then I.SameLine(c) end; if I.RadioButton(c,name:sub(1,1):upper()..name:sub(2),o.mode==name) then o.mode=name; changed=true end end
   I.Separator(c)
@@ -353,7 +375,7 @@ local function shape_popup(app,def)
   if changed or not app.lane_tool_preview then preview(app,def,o.mode,o) end
   I.Spacing(c); I.Separator(c); I.Spacing(c)
   if app.transform_notice then I.TextWrapped(c,app.transform_notice)end
-  I.BeginDisabled(c,not app.lane_tool_preview or app.lane_tool_preview.multi_controller and not app.lane_tool_preview.valid); I.PushStyleColor(c,I.Col_Button,app.theme.accent)
+  I.BeginDisabled(c,not app.lane_tool_preview or (app.lane_tool_preview.multi_controller or app.lane_tool_preview.multi_notes) and not app.lane_tool_preview.valid); I.PushStyleColor(c,I.Col_Button,app.theme.accent)
   if I.Button(c,'Apply',120,0) then M.apply(app); I.CloseCurrentPopup(c) end
   I.PopStyleColor(c); I.EndDisabled(c); I.SameLine(c)
   if I.Button(c,'Cancel',100,0) then M.cancel(app); I.CloseCurrentPopup(c) end
@@ -594,7 +616,7 @@ end
 function M.draw(app,x,y,width,height)
   local I,c,T=app.ImGui,app.ctx,app.theme; local def=target(app)
   local scope,first,last=automatic_scope(app); local signature=def.id..':'..(app.settings.channel or 0)..':'..scope..':'..string.format('%.6f:%.6f',first,last)
-  if app.lane_tool_preview and not app.lane_tool_preview.multi_controller and app.lane_tool_preview.signature~=signature then M.cancel(app,false) end
+  if app.lane_tool_preview and not app.lane_tool_preview.multi_controller and not app.lane_tool_preview.multi_notes and app.lane_tool_preview.signature~=signature then M.cancel(app,false) end
   local drawlist=I.GetWindowDrawList(c)
   I.DrawList_AddRectFilled(drawlist,x-3,y-2,x+width+3,y+height-1,T.panel,6)
   I.PushStyleColor(c,I.Col_Button,T.panel2)
@@ -624,10 +646,10 @@ function M.draw(app,x,y,width,height)
     else app.lane_hidden_tools[#app.lane_hidden_tools+1]=entry end
   end
   I.SameLine(c)
-  I.BeginDisabled(c,app.multi_edit_mode==true and app.controller_point_context==nil)
+  I.BeginDisabled(c,app.multi_edit_mode==true and not def.note and app.controller_point_context==nil)
   if I.Button(c,'Shape##lane_shape') then prepare_note_tool(app); I.OpenPopup(c,'##lane_shape_popup') end
   I.EndDisabled(c)
-  if I.IsItemHovered(c) then I.SetTooltip(c,app.multi_edit_mode and 'Click a controller lane to focus its source/channel, then Shape generates Curve/LFO/Step with preview, Apply and Cancel.' or def.protected and ('Shape is unavailable for protected '..def.label..' messages.') or ('Shape '..def.label..': Curve, LFO and repeating Step')) end
+  if I.IsItemHovered(c) then I.SetTooltip(c,app.multi_edit_mode and not def.note and 'Click a controller lane to focus its source/channel, then Shape generates Curve/LFO/Step with preview, Apply and Cancel.' or def.protected and ('Shape is unavailable for protected '..def.label..' messages.') or ('Shape '..def.label..': Curve, LFO and repeating Step')) end
   I.SameLine(c); tool_button(app,'More','more','More phrase actions','##lane_more')
   I.PopStyleVar(c,2)
   I.PopStyleColor(c)

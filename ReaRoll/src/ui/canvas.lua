@@ -1441,6 +1441,7 @@ local function finish_gesture(app,notes)
 end
 
 function C.draw(app)
+  app.empty_view_track=nil
   if app.multi_edit_mode then
     local state=require('src.multi_notes').refresh(app)
     local x,y=app.ImGui.GetCursorScreenPos(app.ctx);local w,h=app.ImGui.GetContentRegionAvail(app.ctx)
@@ -2088,6 +2089,13 @@ end
 
 function C.draw_empty(app,track)
   local I,c,T,s=app.ImGui,app.ctx,app.theme,app.settings
+  -- An empty roll has no item scrollbar to reveal a saved item viewport.
+  -- Start each empty-track session at project zero, then allow manual navigation.
+  if app.empty_view_track~=track then
+    app.empty_view_track=track
+    s.start_qn=0
+    if app.viewport then app.viewport:cancel_scroll();app.viewport.zoom_target=nil;app.viewport.time_zoom_anchor=nil end
+  end
   local aw,ah=I.GetContentRegionAvail(c); local key_w,ruler_h,bottom,right=88,22,16,16
   local x0,y0=I.GetCursorScreenPos(c); local gx,gy=x0+key_w,y0+ruler_h
   local gw,gh=math.max(100,aw-key_w-right),math.max(90,ah-ruler_h-bottom)
