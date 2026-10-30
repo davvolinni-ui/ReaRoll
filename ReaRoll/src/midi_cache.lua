@@ -9,7 +9,14 @@ Cache.detect_overlaps=detect_overlaps
 function Cache.new() return setmetatable({take=nil,hash=nil,notes={},overlap_count=0,dirty=true,next_poll=0},Cache) end
 function Cache:set_take(take) if self.take==take then return end; self.take,self.hash,self.notes,self.overlap_count,self.dirty,self.next_poll=take,nil,{},0,true,0 end
 function Cache:invalidate() self.dirty=true; self.hash=nil end
+local function available(cache)
+  if Notes.available(cache.take)then return true end
+  cache.notes={}; cache.hash=nil; cache.overlap_count=0
+  cache.dirty=cache.take~=nil; cache.next_poll=0
+  return false
+end
 function Cache:rebuild()
+  if not available(self)then return end
   self.notes={}; if not self.take then self.dirty=false return end
   local a=self.edit and self.edit.active
   local stream=a and a.take==self.take and a.stream or Notes.read(self.take)
@@ -23,6 +30,7 @@ function Cache:rebuild()
   local ok,hash=reaper.MIDI_GetHash(self.take,true,''); self.hash=ok and hash or nil; self.dirty=false
 end
 function Cache:get(active)
+  if not available(self)then return self.notes end
   active=active or self.edit and self.edit.active~=nil
   if self.dirty then self:rebuild() end
   local now=reaper.time_precise()

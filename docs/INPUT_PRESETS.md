@@ -1,6 +1,6 @@
 # Input presets
 
-Choose a preset in **Setup > Shortcuts and mouse modifiers**. It replaces both keyboard and note-grid mouse bindings. You can then change or disable individual controls; the selector shows **Custom**. Closing ReaRoll saves these settings. Existing custom shortcuts are retained on upgrade, and **ReaRoll Default** restores the original controls.
+Choose a preset in **the three-dot menu > Shortcuts and mouse modifiers**. It replaces both keyboard and note-grid mouse bindings. You can then change or disable individual controls; the selector shows **Custom**. Closing ReaRoll saves these settings. Existing custom shortcuts are retained on upgrade, and **ReaRoll Default** restores the original controls.
 
 These are Windows-oriented starting points for ReaRoll's supported actions, rather than imports of another application's complete keymap or your REAPER preferences.
 

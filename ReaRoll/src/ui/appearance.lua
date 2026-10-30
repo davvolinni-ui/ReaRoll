@@ -104,6 +104,16 @@ function M.draw(app)
   if visible then
     if I.BeginTabBar(c,'##theme_tabs') then
       if I.BeginTabItem(c,'General') then
+        I.Text(c,'Mouse information')
+        local changed
+        changed,app.settings.note_mouse_info=I.Checkbox(c,'Show note information at mouse',app.settings.note_mouse_info~=false)
+        changed,app.settings.tooltips_enabled=I.Checkbox(c,'Mouse tooltips',app.settings.tooltips_enabled~=false)
+        I.BeginDisabled(c,app.settings.tooltips_enabled==false)
+        I.SetNextItemWidth(c,180)
+        changed,app.settings.tooltip_delay=I.SliderDouble(c,'Tooltip delay',app.settings.tooltip_delay or .45,0,1.5,'%.2f s')
+        I.EndDisabled(c)
+        I.TextWrapped(c,'Note previews and resize cursors stay visible. These preferences hide mouse labels and hover help, not error messages.')
+        I.Separator(c)
         I.Text(c,'Theme behavior')
         local scroll_changed; scroll_changed,app.settings.smooth_scroll=I.Checkbox(c,'Smooth wheel scrolling and zoom',app.settings.smooth_scroll)
         if I.IsItemHovered(c) then I.SetTooltip(c,'Ease wheel scrolling and modifier-wheel zoom. Dragging stays direct.') end
@@ -120,6 +130,9 @@ function M.draw(app)
         I.SameLine(c); I.TextDisabled(c,string.format('%d%%',math.floor((app.settings.ui_scale or 1)*100+.5)))
         local uniform_changed; uniform_changed,app.settings.uniform_note_color=I.Checkbox(c,'Use one note color for all MIDI channels',app.settings.uniform_note_color)
         Controls.toggle(app,app.settings,'uniform_note_color',false,'Uniform note color')
+        if I.BeginCombo(c,'Note colors',app.settings.note_color_mode or 'track')then
+          for _,mode in ipairs(require('src.note_colors').modes)do if I.Selectable(c,mode,app.settings.note_color_mode==mode)then app.settings.note_color_mode=mode;app.settings.uniform_note_color=mode=='single'end end;I.EndCombo(c)
+        end
         local opacity_changed; opacity_changed,app.settings.scale_opacity=I.SliderDouble(c,'Scale highlight strength',app.settings.scale_opacity or .16,.02,.40,'%.2f')
         opacity_changed=Controls.number(app,app.settings,'scale_opacity',.16,.02,.02,.40,'Scale highlight strength') or opacity_changed
         if opacity_changed then M.apply(app) end

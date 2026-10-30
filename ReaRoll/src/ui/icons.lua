@@ -17,6 +17,7 @@ function M.button(app,id,kind,tip,active)
   elseif kind=='more' then for px=8,20,6 do I.DrawList_AddCircleFilled(d,x+sx(px),y+sx(13),sx(2),col) end
   elseif kind=='select' then
     for k=6,18,6 do line(k,5,k+3,5);line(k,21,k+3,21);line(5,k,5,k+3);line(23,k,23,k+3) end
+  elseif kind=='razor' then rect(5,6,23,20); line(10,6,10,20); line(18,6,18,20); line(5,13,23,13)
   elseif kind=='smart' then
     -- Pencil silhouette with a distinct nib and separated eraser cap.
     line(7,16,17,6);line(17,6,22,11);line(22,11,12,21)
@@ -34,6 +35,12 @@ function M.button(app,id,kind,tip,active)
     for _,px in ipairs({8,14,17}) do
       I.DrawList_AddRectFilled(d,x+sx(px),y+sx(6),x+sx(px+2.5),y+sx(14),col)
     end
+  elseif kind=='mpe' then
+    local width,height=I.CalcTextSize(c,'MPE')
+    I.DrawList_AddText(d,x+(sx(28)-width)*.5,y+(sx(26)-height)*.5,col,'MPE')
+  elseif kind=='slide' then
+    line(4,20,9,20);line(20,6,25,6)
+    I.DrawList_AddBezierCubic(d,x+sx(9),y+sx(20),x+sx(18),y+sx(20),x+sx(12),y+sx(6),x+sx(20),y+sx(6),col,sx(1.5))
   elseif kind=='slice' then line(7,20,21,6); line(8,6,20,18); I.DrawList_AddCircle(d,x+sx(7),y+sx(19),sx(3),col,0,sx(1.5))
   elseif kind=='glue' then rect(5,8,12,18); rect(16,8,23,18); line(11,13,17,13); line(14,10,14,16)
   elseif kind=='mute' then rect(6,10,10,16); line(10,10,15,6); line(15,6,15,20); line(15,20,10,16); line(19,10,24,16); line(24,10,19,16)
@@ -63,6 +70,28 @@ function M.button(app,id,kind,tip,active)
   elseif kind=='snap_relative' then
     line(7,7,7,16); line(7,16,10,19); line(10,19,14,20.5); line(14,20.5,18,19); line(18,19,21,16); line(21,16,21,7)
     line(7,10,10,10); line(18,10,21,10)
+  elseif kind=='pitch_curve' then line(5,21,23,21);line(5,21,5,5);line(7,16,13,9);line(13,9,21,13);for _,p in ipairs({{7,16},{13,9},{21,13}})do I.DrawList_AddCircleFilled(d,x+sx(p[1]),y+sx(p[2]),sx(2),col)end
+  elseif kind=='item_scope' then rect(4,5,19,17);rect(9,10,24,22);line(13,14,20,14);line(13,18,20,18)
+  elseif kind=='expression' then
+    rect(4,5,24,22);line(6,18,11,12);line(11,12,17,16);line(17,16,22,8)
+    for _,p in ipairs({{11,12},{17,16},{22,8}})do I.DrawList_AddCircleFilled(d,x+sx(p[1]),y+sx(p[2]),sx(1.8),col)end
+  elseif kind=='pitch_overlay' then
+    rect(4,18,24,22);line(5,16,11,16);line(11,16,18,6);line(18,6,24,6)
+  elseif kind=='pressure' then
+    line(5,20,23,20);line(14,17,14,5);line(9,10,14,5);line(14,5,19,10)
+    line(7,13,7,17);line(21,13,21,17)
+  elseif kind=='timbre' then
+    I.DrawList_AddBezierCubic(d,x+sx(4),y+sx(14),x+sx(10),y+sx(0),x+sx(17),y+sx(26),x+sx(24),y+sx(12),col,sx(1.5))
+    line(5,22,23,22)
+  elseif kind=='velocity' or kind=='release_velocity' then
+    for k=0,3 do rect(5+k*5,18-k*3,8+k*5,22)end
+    if kind=='release_velocity'then line(6,5,20,5);line(6,5,10,2);line(6,5,10,8)end
+  elseif kind=='expression_group' then
+    for k=0,2 do local yy=6+k*7;line(5,yy,23,yy);local px=9+k*5;I.DrawList_AddCircleFilled(d,x+sx(px),y+sx(yy),sx(2.5),col)end
+  elseif kind=='apply' then line(6,13,12,19);line(12,19,23,7)
+  elseif kind=='close' then line(8,7,21,20);line(8,20,21,7)
+  elseif kind=='speaker' then rect(5,10,9,16);line(9,10,14,6);line(14,6,14,20);line(14,20,9,16);line(18,9,21,13);line(21,13,18,17)
+  elseif kind=='scale_rows' then for k=0,3 do rect(6,5+k*5,22-k*3,7+k*5)end
   elseif kind=='fold' then line(7,6,14,11); line(14,11,21,6); line(7,20,14,15); line(14,15,21,20)
   elseif kind=='scale' then for k=0,3 do line(6+k*4,19-k*3,10+k*4,19-k*3) end
   elseif kind=='ghost' then I.DrawList_AddCircle(d,x+sx(14),y+sx(12),sx(7),col,0,sx(1.5)); line(7,12,7,21); line(21,12,21,21); line(7,21,11,18); line(11,18,15,21); line(15,21,18,18); line(18,18,21,21); line(11,11,11,13); line(17,11,17,13)

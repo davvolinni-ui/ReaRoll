@@ -1,8 +1,14 @@
 /.validation-deps/
 /dist/
-/docs/
+/docs/*
+!/docs/INPUT_PRESETS.md
 /tests/
 /INSTALL.txt
 /PUBLISHING.md
 __pycache__/
 *.pyc
+/tools/
+/backups/
+/output/
+/COMPETITIVE_AUDIT.md
+/MULTI_ITEM_WORKFLOW_AUDIT.md

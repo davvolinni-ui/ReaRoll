@@ -21,7 +21,7 @@ end
 local function chosen(app) return Selection.list(app.selection,app.cache:get(false)) end
 local function apply(app,name,fn)
   local notes=chosen(app); if #notes==0 then return false end
-  app.edit:begin('ReaRoll: '..name,app.take); fn(notes); app.edit:finish(); app.cache:rebuild(); app:reselect_notes(notes); return true
+  app.edit:begin('ReaRoll: '..name,app.take);app.edit:begin_group();fn(notes);app.edit:end_group();local ok=app.edit:finish();app.cache:rebuild();if ok~=false then app:reselect_notes(notes)end;return ok~=false
 end
 
 function M.reverse(app)
@@ -77,7 +77,7 @@ function M.legato(app,gap_qn,all_pitches)
   gap_qn=math.min(0,gap_qn or 0)
   return apply(app,'legato',function(notes)
     local by_pitch={}
-    for _,n in ipairs(notes) do local key=all_pitches and 0 or n.pitch; by_pitch[key]=by_pitch[key] or {}; by_pitch[key][#by_pitch[key]+1]=n end
+    for _,n in ipairs(notes) do local key=tostring(n.chan or 0)..':'..(all_pitches and '*' or tostring(n.pitch)); by_pitch[key]=by_pitch[key] or {}; by_pitch[key][#by_pitch[key]+1]=n end
     for _,group in pairs(by_pitch) do
       table.sort(group,function(a,b)return a.s<b.s end)
       for i=1,#group-1 do local n,next_note=group[i]; for j=i+1,#group do if group[j].s>n.s then next_note=group[j]; break end end; if next_note then local target=next_note.s+reaper.MIDI_GetPPQPosFromProjQN(app.take,(gap_qn or 0))-reaper.MIDI_GetPPQPosFromProjQN(app.take,0); target=math.max(n.s+1,target); app.edit:set(n.index,app.take,nil,target,nil,nil); n.e=target end end
@@ -139,6 +139,7 @@ end
 
 local function restore_preview(app,keep)
   local p=app.transform_preview; if not p then return false end
+  if p.settings_before then for _,key in ipairs({'pitch_bend_range','mpe_pitch_bend_range','mpe_enabled','note_expression_overlay'})do app.settings[key]=p.settings_before[key]end end
   if p.take and reaper.ValidatePtr2(0,p.take,'MediaItem_Take*') then reaper.MIDI_SetAllEvts(p.take,p.raw); reaper.MIDI_Sort(p.take); Notes.set_pairing_state(p.take,p.pairing_state) end
   app.cache:invalidate(); app.cache:rebuild(); app.cc_cache:invalidate(); app:reselect_notes(p.originals)
   if not keep then app.transform_preview=nil end
@@ -160,7 +161,9 @@ local function preview_notes(app,kind,mutate,source_notes)
   local p=start_preview(app,kind,source_notes); if not p then return false end; restore_preview(app,true)
   local notes={}; for _,source in ipairs(p.originals) do local n=app.cache.notes[source.index+1]; if n then notes[#notes+1]=n end end
   app.edit:begin_preview(app.take)
+  app.edit:begin_group()
   mutate(notes,p)
+  app.edit:end_group()
   -- Capture the edited transaction before finishing: cached copies and the
   -- originals still carry the old pitch/velocity and cannot identify the
   -- previewed notes after the cache rebuild.
@@ -169,7 +172,7 @@ local function preview_notes(app,kind,mutate,source_notes)
     local edited=app.edit.active and app.edit.active.notes[n.index+1]
     wanted[#wanted+1]=Notes.copy_note(edited or n)
   end
-  app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); reaper.UpdateArrange(); return true
+  local finished=app.edit:finish();p.invalid=finished==false;app.cache:rebuild();app:reselect_notes(p.invalid and p.originals or wanted);reaper.UpdateArrange();return not p.invalid
 end
 
 function M.preview_velocity(app,mode,value,amount,pivot,first,last)
@@ -186,11 +189,69 @@ function M.preview_velocity(app,mode,value,amount,pivot,first,last)
   end,targets)
 end
 
-function M.preview_quantize(app,ends_too,step,strength)
+function M.preview_quantize(app,ends_too,step,strength,swing,template,velocity_strength)
   step=step or app.settings.grid_qn; strength=U.clamp((strength or 100)/100,0,1)
+  local function snap(q)
+    if template then return require('src.groove_template').target(template,q,app.item_start_qn or 0) end
+    if not swing or swing==0 then return U.snap(q,step) end
+    return require('src.groove').target(q,step,swing,app.item_start_qn or 0)
+  end
   return preview_notes(app,'quantize',function(notes)
-    for _,n in ipairs(notes) do local sq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s); local eq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.e); local nsq=sq+(U.snap(sq,step)-sq)*strength; local neq=ends_too and eq+(U.snap(eq,step)-eq)*strength or nsq+(eq-sq); if neq<=nsq then neq=nsq+step end; local ns,ne=fit_note(app,reaper.MIDI_GetPPQPosFromProjQN(app.take,nsq),reaper.MIDI_GetPPQPosFromProjQN(app.take,neq)); app.edit:set(n.index,app.take,ns,ne,nil,nil) end
+    if template and (velocity_strength or 0)>0 then
+      for _,n in ipairs(notes)do
+        local _,velocity=snap(reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s))
+        app.edit:set(n.index,app.take,nil,nil,nil,U.clamp(math.floor(n.vel+(velocity-n.vel)*U.clamp(velocity_strength/100,0,1)+.5),1,127))
+      end
+    end
+    for _,n in ipairs(notes) do local sq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s); local eq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.e); local nsq=sq+(snap(sq)-sq)*strength; local neq=ends_too and eq+(snap(eq)-eq)*strength or nsq+(eq-sq); if neq<=nsq then neq=nsq+step end; local ns,ne=fit_note(app,reaper.MIDI_GetPPQPosFromProjQN(app.take,nsq),reaper.MIDI_GetPPQPosFromProjQN(app.take,neq)); app.edit:set(n.index,app.take,ns,ne,nil,nil) end
   end)
+end
+
+function M.preview_glide(app,options)
+  local p=start_preview(app,'glide');if not p then return false end
+  restore_preview(app,true)
+  local Glide=require 'src.glide';local selected,all,events={},{},{}
+  local function musical(n)
+    return {index=n.index,s=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s),e=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.e),pitch=n.pitch,chan=n.chan,vel=n.vel,muted=n.muted}
+  end
+  for _,n in ipairs(p.originals)do selected[#selected+1]=musical(n)end
+  for _,n in ipairs(app.cache:get(false))do all[#all+1]=musical(n)end
+  for _,e in ipairs(app.cc_cache:get(false))do events[#events+1]={q=reaper.MIDI_GetProjQNFromPPQPos(app.take,e.ppq),chan=e.chan,status=e.chanmsg,cc=e.msg2,value=e.msg3}end
+  local plan,notice=Glide.plan(selected,all,events,options)
+  local points
+  if plan then points,notice=Glide.points(plan,function(q)return reaper.MIDI_GetPPQPosFromProjQN(app.take,q)end)end
+  p.invalid=not points;app.glide_notice=notice
+  if not points then return false end
+  if not p.settings_before then p.settings_before={};for _,key in ipairs({'pitch_bend_range','mpe_pitch_bend_range','mpe_enabled','note_expression_overlay'})do p.settings_before[key]=app.settings[key]end end
+  if plan.mpe then app.settings.mpe_pitch_bend_range=plan.range;app.settings.mpe_enabled=true else app.settings.pitch_bend_range=plan.range end
+  app.settings.note_expression_overlay=true
+  p.settings_after={};for _,key in ipairs({'pitch_bend_range','mpe_pitch_bend_range','mpe_enabled','note_expression_overlay'})do p.settings_after[key]=app.settings[key]end
+  app.edit:begin_preview(app.take)
+  local a=app.edit.active
+  if plan.replace then
+    for index,event in ipairs(a.stream.events)do
+      if #event.msg==3 and event.msg:byte(1)>>4==14 then
+        local q=reaper.MIDI_GetProjQNFromPPQPos(app.take,event.ppq);local chan=event.msg:byte(1)&15
+        for _,curve in ipairs(plan.curves)do if chan==curve.note.chan and q>=curve.note.s and q<=curve.ending then
+          event.deleted=true
+          local following=a.stream.events[index+1]
+          if following and following.msg:sub(1,7)==string.char(0xFF,0x0F)..'CCBZ ' then following.deleted=true end
+          break
+        end end
+      end
+    end
+  end
+  local wanted={}
+  for _,n in ipairs(plan.notes)do
+    app.edit:set_properties(app.take,n.index,{e=reaper.MIDI_GetPPQPosFromProjQN(app.take,n.e),chan=n.chan})
+    wanted[#wanted+1]={s=reaper.MIDI_GetPPQPosFromProjQN(app.take,n.s),e=reaper.MIDI_GetPPQPosFromProjQN(app.take,n.e),pitch=n.pitch,vel=n.vel,chan=n.chan}
+  end
+  for _,point in ipairs(points)do
+    a.stream.events[#a.stream.events+1]={ppq=point.ppq,flags=0,msg=string.char(0xE0|point.chan,point.value&127,(point.value>>7)&127),order=-1000000000+#a.stream.events}
+  end
+  a.changed=true;a.stream.dirty=true
+  app.edit:finish();app.cache:rebuild();app.cc_cache:invalidate();app:reselect_notes(wanted)
+  p.glide_count=#plan.curves;return true
 end
 
 function M.scale_pitch(music,root,scale,pitch,direction)
@@ -208,7 +269,8 @@ end
 function M.preview_scale_quantize(app,direction)
   return preview_notes(app,'scale_quantize',function(notes)
     for _,n in ipairs(notes) do
-      local pitch=M.scale_pitch(app.music,app.settings.scale_root,app.settings.scale_name,n.pitch,direction)
+      local root,scale=require('src.harmony_regions').at(app,reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s))
+      local pitch=M.scale_pitch(app.music,root,scale,n.pitch,direction)
       app.edit:set(n.index,app.take,nil,nil,pitch,nil)
     end
   end)
@@ -233,12 +295,26 @@ function M.preview_pitch(app,amount,in_scale)
 end
 
 function M.preview_legato(app,gap_qn,all_pitches)
-  gap_qn=math.min(0,gap_qn or 0)
+  gap_qn=U.clamp(gap_qn or 0,-.25,.25)
   return preview_notes(app,'legato',function(notes)
-    local groups={}; for _,n in ipairs(notes) do local key=all_pitches and 0 or n.pitch; groups[key]=groups[key] or {}; groups[key][#groups[key]+1]=n end
     local delta=reaper.MIDI_GetPPQPosFromProjQN(app.take,gap_qn or 0)-reaper.MIDI_GetPPQPosFromProjQN(app.take,0)
     local _,item_e=item_ppq_bounds(app)
-    for _,group in pairs(groups) do table.sort(group,function(a,b)return a.s<b.s end); for i=1,#group-1 do local n,next_note=group[i]; for j=i+1,#group do if group[j].s>n.s then next_note=group[j]; break end end; if next_note then local target=U.clamp(next_note.s+delta,n.s+1,item_e); app.edit:set(n.index,app.take,nil,target,nil,nil) end end end
+    if gap_qn>0 and app.edit.active then app.edit.active.allow_overlaps=true end
+    for _,target in ipairs(require('src.legato').targets(notes,all_pitches,delta,item_e))do app.edit:set(target.note.index,app.take,nil,target.ending,nil,nil)end
+  end)
+end
+
+function M.preview_portamento(app,overlap_qn)
+  overlap_qn=U.clamp(overlap_qn or .03125,.001,1)
+  return preview_notes(app,'glide',function(notes)
+    local _,item_e=item_ppq_bounds(app)
+    for _,target in ipairs(require('src.legato').targets(notes,true,0,item_e))do
+      local onset=reaper.MIDI_GetProjQNFromPPQPos(app.take,target.ending)
+      local ending=math.min(item_e,reaper.MIDI_GetPPQPosFromProjQN(app.take,onset+overlap_qn))
+      -- This explicit overlap operation also supports repeated pitches.
+      if app.edit.active then app.edit.active.allow_overlaps=true end
+      app.edit:set(target.note.index,app.take,nil,ending,nil,nil)
+    end
   end)
 end
 
@@ -269,7 +345,7 @@ function M.preview_arpeggiate(app,direction,gate,octaves,swing,options)
   for _,n in ipairs(generated) do
     local ns,ne=reaper.MIDI_GetPPQPosFromProjQN(app.take,n.s),reaper.MIDI_GetPPQPosFromProjQN(app.take,n.e)
     app.edit:insert(app.take,ns,ne,n.pitch,n.vel,n.chan,true,n.muted)
-    wanted[#wanted+1]={s=ns,e=ne,pitch=n.pitch,vel=n.vel}
+    wanted[#wanted+1]={s=ns,e=ne,pitch=n.pitch,vel=n.vel,chan=n.chan}
   end
   app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); reaper.UpdateArrange(); return true
 end
@@ -284,7 +360,7 @@ function M.preview_strum(app,direction)
   for _,n in ipairs(notes) do local current=bucket(n); if current~=group then group=current; position=0 end
     local sq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s); local eq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.e); local shift=position*app.settings.strum_qn
     local ns,ne=fit_note(app,reaper.MIDI_GetPPQPosFromProjQN(app.take,sq+shift),reaper.MIDI_GetPPQPosFromProjQN(app.take,eq+shift)); app.edit:set(n.index,app.take,ns,ne,nil,nil)
-    wanted[#wanted+1]={s=ns,e=ne,pitch=n.pitch,vel=n.vel}; position=position+1
+    wanted[#wanted+1]={s=ns,e=ne,pitch=n.pitch,vel=n.vel,chan=n.chan}; position=position+1
   end
   app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); reaper.UpdateArrange(); return true
 end
@@ -310,19 +386,20 @@ function M.preview_flam(app)
   app.edit:begin_preview(app.take)
   for _,n in ipairs(p.originals) do
     local first_e,s,e=flam_timing(app,n); app.edit:set(n.index,app.take,nil,first_e,nil,nil)
-    wanted[#wanted+1]={s=n.s,e=first_e,pitch=n.pitch,vel=n.vel}; if s then local vel=U.clamp(math.floor(n.vel*.72+.5),1,127)
+    wanted[#wanted+1]={s=n.s,e=first_e,pitch=n.pitch,vel=n.vel,chan=n.chan}; if s then local vel=U.clamp(math.floor(n.vel*.72+.5),1,127)
     app.edit:insert(app.take,s,e,n.pitch,vel,n.chan,true,n.muted); wanted[#wanted+1]={s=s,e=e,pitch=n.pitch,vel=vel} end
   end
   app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); reaper.UpdateArrange(); return true
 end
 
 function M.commit_preview(app)
-  local p=app.transform_preview; if not p then return false end
+  local p=app.transform_preview; if not p or p.invalid then return false end
   local ok,result=reaper.MIDI_GetAllEvts(app.take,''); if not ok then return false end
   local pairing_state=Notes.get_pairing_state(app.take)
-  local wanted={}; for _,n in ipairs(Selection.list(app.selection,app.cache:get(false))) do wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel} end
+  local wanted={}; for _,n in ipairs(Selection.list(app.selection,app.cache:get(false))) do wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan} end
   local names={strum='strum',flam='flam',quantize='quantize notes',scale_quantize='quantize notes to scale',pitch='transpose notes',legato='legato',humanize='humanize',arp='arpeggiate selection',velocity='edit velocity'}
   local name=names[p.kind] or p.kind; restore_preview(app,false)
+  if p.settings_after then for _,key in ipairs({'pitch_bend_range','mpe_pitch_bend_range','mpe_enabled','note_expression_overlay'})do app.settings[key]=p.settings_after[key]end end
   app.edit:begin('ReaRoll: '..name,app.take); reaper.MIDI_SetAllEvts(app.take,result); Notes.set_pairing_state(app.take,pairing_state); app.edit:touch(); app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); return true
 end
 
@@ -331,7 +408,7 @@ function M.flam(app)
   app.edit:begin('ReaRoll: flam',app.take); local wanted={}
   for _,n in ipairs(notes) do
     local first_e,s,e=flam_timing(app,n); if first_e~=n.e then app.edit:set(n.index,app.take,nil,first_e,nil,nil); n.e=first_e end
-    wanted[#wanted+1]={s=n.s,e=first_e,pitch=n.pitch,vel=n.vel}
+    wanted[#wanted+1]={s=n.s,e=first_e,pitch=n.pitch,vel=n.vel,chan=n.chan}
     if s then local vel=U.clamp(math.floor(n.vel*.72+.5),1,127)
     app.edit:insert(app.take,s,e,n.pitch,vel,n.chan,true,n.muted); wanted[#wanted+1]={s=s,e=e,pitch=n.pitch,vel=vel} end
   end
@@ -353,9 +430,16 @@ end
 local function replace_selection(app,name,build)
   local notes=chosen(app); if #notes==0 then return false end
   local replacements=build(notes); if not replacements or #replacements==0 then return false end
-  app.edit:begin('ReaRoll: '..name,app.take); local indices={}; for _,n in ipairs(notes) do indices[#indices+1]=n.index end; app.edit:delete_indices(app.take,indices)
+  local unchanged=#notes==#replacements
+  if unchanged then for _,p in ipairs(replacements)do local source
+    for _,n in ipairs(notes)do if n.index==p.source_index then source=n;break end end
+    if not source or p.s~=source.s or p.e~=source.e or p.pitch~=source.pitch or p.chan~=source.chan then unchanged=false;break end
+  end end
+  if unchanged then return true end
+  app.edit:begin('ReaRoll: '..name,app.take); local indices={}; for _,n in ipairs(notes) do indices[#indices+1]=n.index end;if not app.edit.replace_notes and app.edit.structural_guard and not app.edit:structural_guard(indices)then app.edit:cancel();return false end
+  if app.edit.replace_notes then if not app.edit:replace_notes(app.take,indices,replacements)then app.edit:cancel();return false end else app.edit:delete_indices(app.take,indices)end
   local wanted={}
-  for _,n in ipairs(replacements) do app.edit:insert(app.take,n.s,n.e,n.pitch,n.vel,n.chan,true,n.muted); wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel} end
+  for _,n in ipairs(replacements) do if not app.edit.replace_notes then app.edit:insert(app.take,n.s,n.e,n.pitch,n.vel,n.chan,true,n.muted)end; wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan} end
   app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted); return true
 end
 
@@ -365,7 +449,7 @@ function M.chop(app)
     local out={}
     for _,n in ipairs(notes) do
       local sq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.s); local eq=reaper.MIDI_GetProjQNFromPPQPos(app.take,n.e); local q=sq
-      while q<eq-.000001 do local next_q=math.min(eq,q+step); out[#out+1]={s=reaper.MIDI_GetPPQPosFromProjQN(app.take,q),e=reaper.MIDI_GetPPQPosFromProjQN(app.take,next_q),pitch=n.pitch,vel=n.vel,chan=n.chan,muted=n.muted}; q=next_q end
+      while q<eq-.000001 do local next_q=math.min(eq,q+step); out[#out+1]={s=reaper.MIDI_GetPPQPosFromProjQN(app.take,q),e=reaper.MIDI_GetPPQPosFromProjQN(app.take,next_q),pitch=n.pitch,vel=n.vel,chan=n.chan,muted=n.muted,source_index=n.index}; q=next_q end
     end
     return out
   end)
@@ -417,11 +501,28 @@ function M.glue(app)
     local out={}
     for _,n in ipairs(notes) do
       local last=out[#out]
-      if last and last.pitch==n.pitch and last.chan==n.chan and n.s<=last.e+.5 then last.e=math.max(last.e,n.e)
-      else out[#out+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan,muted=n.muted} end
+      if last and last.pitch==n.pitch and last.chan==n.chan and n.s<=last.e+.5 then if n.e>=last.e then last.e=n.e;last.end_index=n.index end
+      else out[#out+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan,muted=n.muted,source_index=n.index,end_index=n.index} end
     end
     return out
   end)
 end
 
+local base_cancel,base_commit=M.cancel_preview,M.commit_preview
+M.cancel_preview=function(app)
+  if app.scoped_phrase_preview then return require('src.phrase_scope').cancel(app)end
+  return base_cancel(app)
+end
+M.commit_preview=function(app)
+  if app.scoped_phrase_preview then return require('src.phrase_scope').commit(app)end
+  if app.transform_preview and app.transform_preview.scoped then return false end
+  return base_commit(app)
+end
+for _,name in ipairs({'preview_velocity','preview_quantize','preview_glide','preview_portamento','preview_scale_quantize','preview_pitch','preview_legato','preview_humanize','preview_arpeggiate','preview_strum','preview_flam'})do
+  local run=M[name]
+  M[name]=function(app,...)
+    if (app.settings.phrase_scope or 'active')~='active' then return require('src.phrase_scope').preview(app,name,run,base_cancel,...)end
+    return run(app,...)
+  end
+end
 return M

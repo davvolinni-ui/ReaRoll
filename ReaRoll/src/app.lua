@@ -23,6 +23,8 @@ local Sources=require 'src.ui.sources'
 local KeyMap=require 'src.key_map'
 local KeyMapUI=require 'src.ui.key_map'
 local LaneTools=require 'src.ui.lane_tools'
+local Workspace=require 'src.ui.workspace'
+local Inspector=require 'src.ui.inspector'
 
 local App={}; App.__index=App
 local function draw_child(I,c,id,width,height,draw,window_flags)
@@ -37,7 +39,7 @@ end
 function App.new(ImGui)
   local self=setmetatable({},App)
   self.ImGui=ImGui; self.ctx=ImGui.CreateContext('ReaRoll'); self.open=true
-  self.settings=Settings.load(); Shortcuts.load(self.settings); self.theme=Theme; self.music=Music; self.transforms=Transforms; self.clipboard=Clipboard; self.cache=Cache.new(); self.cc_cache=CCCache.new(); self.ghost=GhostCache.new(); self.selection=Selection.new()
+  self.settings=Settings.load(); self.ImGui=require('src.ui.tooltip_policy').wrap(ImGui,self.settings); Shortcuts.load(self.settings); self.theme=Theme; self.music=Music; self.transforms=Transforms; self.clipboard=Clipboard; self.cache=Cache.new(); self.cc_cache=CCCache.new(); self.ghost=GhostCache.new(); self.selection=Selection.new()
   self.viewport=Viewport.new(self.settings); self.edit=Edit.new(self.cache,self.selection,self.cc_cache); self.edit.app=self; self.audition=Audition.new(self.settings)
   Appearance.init(self)
   self.take=nil; self.take_name='No MIDI take selected'; self.next_take_poll=0; self.gesture=nil; self.shut_down=false
@@ -51,7 +53,7 @@ function App:reselect_notes(wanted)
   Selection.clear(self.selection); local used={}
   for _,w in ipairs(wanted) do
     local best,bestd
-    for _,n in ipairs(self.cache.notes) do if not used[n] and n.pitch==w.pitch and n.vel==w.vel then local d=math.abs(n.s-w.s)+math.abs(n.e-w.e); if not bestd or d<bestd then best,bestd=n,d end end end
+    for _,n in ipairs(self.cache.notes) do if not used[n] and n.pitch==w.pitch and n.vel==w.vel and (w.chan==nil or n.chan==w.chan) then local d=math.abs(n.s-w.s)+math.abs(n.e-w.e); if not bestd or d<bestd then best,bestd=n,d end end end
     if best then used[best]=true; Selection.add(self.selection,best.id) end
   end
 end
@@ -110,12 +112,21 @@ function App:poll_take()
   self.arrange_selected_items=seen
   local take
   if selected_track and not preferred and #selected==0 then take=nil else take=Take.active(preferred) end
-  if take==self.take then self.empty_track=not take and selected_track or nil; if take then self:sync_item_bounds(take,true) end; return end
+  if take==self.take then self.empty_track=not take and selected_track or nil; if take then self:sync_item_bounds(take,true) end; require('src.mpe_detect').poll(self);return end
+  if self.source_draw then require('src.ui.editable_sources').cancel_draw(self)end
+  if self.multi_slides then require('src.ui.multi_slides').cancel(self);self.multi_slides=nil end
+  if self.multi_notes and self.multi_notes.transaction then require('src.multi_notes').cancel(self);self.multi_notes.drag=nil end
+  if self.multi_notes and self.multi_notes.paint then require('src.multi_notes').paint_cancel(self)end
   if self.transform_preview then self.transforms.cancel_preview(self) end
   if self.lane_tool_preview then LaneTools.cancel(self) end
   self:flush_property_wheel(true)
   if self.edit.active then self.edit:finish() end; self.audition:stop(); self.gesture=nil; Selection.clear(self.selection)
+  self.expression_direct_gesture=nil;self.expression_direct_cache=nil
   self.take=take; self.empty_track=not take and selected_track or nil; self.cache:set_take(take); self.cc_cache:set_take(take); self.note_names={}; self.key_map_selection={}
+  self.lane_ranges={}; self.lane_time_selection=nil; self.controller_lane=nil; self.controller_selection_active=false
+  self.razor_area=nil; self.razor_drag=nil
+  self.razor_areas={}
+  self.controller_razor=nil;self.controller_razor_areas={};self.controller_razor_drag=nil;self.razor_focus=nil;self.mixed_razor=nil
   if take then
     self.take_name=Take.name(take); self:sync_item_bounds(take,false)
     local duration=math.max(.25,self.item_end_qn-self.item_start_qn); self.settings.visible_qn=math.max(1,duration*1.2); self.settings.start_qn=math.max(0,self.item_start_qn-(self.settings.visible_qn-duration)*.5)
@@ -130,6 +141,7 @@ function App:poll_take()
       self.pending_note_select=nil
     end
   else self.take_name='No MIDI take selected'; self.key_map_track=nil; self.key_colors={} end
+  require('src.mpe_detect').poll(self)
 end
 function App:save_key_colors() KeyMap.save_track(self.key_map_track,self.key_colors) end
 function App:focus_take(take,note)
@@ -179,6 +191,8 @@ function App:set_item_extents(start_qn,end_qn)
   return ok
 end
 function App:note_label(pitch)
+  local mapped=require('src.instrument_map').label(self.instrument_map,self.settings.channel,pitch)
+  if mapped then return mapped end
   local key=self.settings.channel..':'..pitch
   if self.note_names[key]~=nil then return self.note_names[key] or nil end
   local name=nil
@@ -214,6 +228,13 @@ function App:fit_pitches()
   if self.viewport.h then self.settings.row_height=math.max(8,math.min(32,self.viewport.h/(hi-lo+5))) end
 end
 function App:fit_selection()
+  if self.multi_edit_mode then
+    local chosen=require('src.multi_notes').chosen(self);if #chosen==0 then chosen=self.multi_notes.notes or {}end
+    local first,last,lo,hi=math.huge,-math.huge,127,0
+    for _,n in ipairs(chosen)do first=math.min(first,n.s);last=math.max(last,n.e);lo=math.min(lo,n.pitch);hi=math.max(hi,n.pitch)end
+    if first<math.huge then self.settings.start_qn=math.max(0,first-.25);self.settings.visible_qn=math.max(.5,last-first+.5);self.settings.low_pitch=math.max(0,lo-2);if self.viewport.h then self.settings.row_height=math.max(8,math.min(32,self.viewport.h/(hi-lo+5)))end end
+    return
+  end
   local chosen=Selection.list(self.selection,self.cache:get(false)); if #chosen==0 then return self:fit_notes() end
   local lo,hi,minppq,maxppq=127,0,math.huge,-math.huge
   for _,n in ipairs(chosen) do lo=math.min(lo,n.pitch); hi=math.max(hi,n.pitch); minppq=math.min(minppq,n.s); maxppq=math.max(maxppq,n.e) end
@@ -262,12 +283,15 @@ function App:flush_property_wheel(force)
   self.edit:finish(); self.cache:rebuild(); self.cc_cache:rebuild(); if state.wanted then self:reselect_notes(state.wanted) end; self.property_wheel=nil; return true
 end
 function App:shutdown()
+  require('src.controller_points').cancel(self)
   if self.shut_down then return end; self.shut_down=true
   if self.transform_preview then self.transforms.cancel_preview(self) end
   if self.lane_tool_preview then LaneTools.cancel(self) end
-  self:flush_property_wheel(true); self.audition:stop(); if self.edit.active then self.edit:finish() end; Settings.save(self.settings); Shortcuts.save(self.settings)
+  if self.multi_edit_mode then require('src.multi_notes').exit(self)end
+  self:flush_property_wheel(true); self.audition:stop(); if self.edit.active then self.edit:finish() end; require('src.mpe_detect').restore(self);require('src.window_state').save(self,true);Settings.save(self.settings); Shortcuts.save(self.settings)
 end
 function App:frame()
+  require('src.controller_points').check(self)
   local I,c=self.ImGui,self.ctx
   if I.GetFrameCount then
     local frame=I.GetFrameCount(c)
@@ -277,11 +301,14 @@ function App:frame()
     end
     self.last_ui_frame=frame
   end
-  self:poll_take(); local T=self.theme
+  self.control_wheel_consumed=false
+  self:poll_take();require('src.instrument_map').refresh(self);require('src.harmony_regions').refresh(self);require('src.input_monitor').update(self); local T=self.theme
   self:flush_property_wheel(false)
+  require('src.chord_track').refresh(self)
   local ui_scale=math.max(.8,math.min(1.5,self.settings.ui_scale or 1))
   local rescue=reaper.GetExtState('ReaRoll','window_rescue')=='1'
   if rescue then reaper.DeleteExtState('ReaRoll','window_rescue',false) end
+  local restored=require('src.window_state').prepare(self,rescue)
   if rescue then
     if I.SetNextWindowDockID then I.SetNextWindowDockID(c,0,I.Cond_Always) end
     if I.GetMainViewport and I.Viewport_GetCenter and I.SetNextWindowPos then
@@ -289,7 +316,7 @@ function App:frame()
       I.SetNextWindowPos(c,center_x,center_y,I.Cond_Always,.5,.5)
     end
     I.SetNextWindowSize(c,1040*ui_scale,390*ui_scale,I.Cond_Always)
-  else I.SetNextWindowSize(c,1040*ui_scale,390*ui_scale,I.Cond_FirstUseEver) end
+  elseif not restored then I.SetNextWindowSize(c,1040*ui_scale,390*ui_scale,I.Cond_FirstUseEver) end
   I.PushStyleColor(c,I.Col_WindowBg,T.bg); I.PushStyleColor(c,I.Col_ChildBg,T.bg); I.PushStyleColor(c,I.Col_Border,T.grid)
   I.PushStyleColor(c,I.Col_Button,T.panel2); I.PushStyleColor(c,I.Col_ButtonHovered,T.beat); I.PushStyleColor(c,I.Col_ButtonActive,T.note)
   I.PushStyleColor(c,I.Col_FrameBg,T.panel2); I.PushStyleColor(c,I.Col_FrameBgHovered,T.beat); I.PushStyleColor(c,I.Col_FrameBgActive,T.ruler_top)
@@ -301,21 +328,44 @@ function App:frame()
   local font_pushed=I.PushFont and pcall(I.PushFont,c,nil,13*ui_scale) or false
   local visible; visible,self.open=I.Begin(c,'ReaRoll',self.open,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
   if visible then
+    require('src.window_state').capture(self)
     Grid.update(self)
     Toolbar.draw(self); I.Separator(c)
     if self.take then
       local width,height=I.GetContentRegionAvail(c)
-      local sources_width=self.sources_open and math.min(148*ui_scale,math.max(132*ui_scale,width*.12)) or 0
-      local spacing=(self.sources_open and 7*ui_scale or 0)
+      local sources_width,inspector_width,workspace_width=Workspace.geometry(width,ui_scale,self.sources_open,self.settings.inspector_open)
       if self.sources_open then
         draw_child(I,c,'##midi_sources_panel',sources_width,height,function() Sources.draw(self) end); I.SameLine(c)
       end
-      local canvas_width=math.max(180,width-sources_width-spacing)
+      local canvas_width=workspace_width
       -- The piano-roll workspace owns its complete geometry. Child padding
       -- otherwise leaves an inherited empty strip below the bottom toolbar.
       I.PushStyleVar(c,I.StyleVar_WindowPadding,0,0)
-      draw_child(I,c,'##piano_roll_workspace',canvas_width,height,function() Canvas.draw(self) end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
+      draw_child(I,c,'##piano_roll_workspace',canvas_width,height,function()
+        local expression_height=self.expression_editor_open and Workspace.expression_height(height,ui_scale,self.expression_panel_height)or 0
+        self.expression_toolbar_external=expression_height>0
+        self.external_phrase_popup_open=nil
+        if self.expression_toolbar_external then self.external_phrase_popup_open=LaneTools.any_popup_open(self)end
+        if expression_height>0 then
+          local tools_height=LaneTools.height(self)
+          draw_child(I,c,'##expression_piano_roll',canvas_width,math.max(90*ui_scale,height-expression_height-tools_height-10*ui_scale),function() Canvas.draw(self)end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
+          I.InvisibleButton(c,'##expression_resize',canvas_width,6*ui_scale)
+          if I.IsItemHovered(c)or I.IsItemActive(c)then I.SetMouseCursor(c,I.MouseCursor_ResizeNS)end
+          if I.IsItemActive(c)then local _,dy=I.GetMouseDelta(c);self.expression_panel_height=Workspace.expression_height(height,ui_scale,expression_height/ui_scale-dy/ui_scale)/ui_scale end
+          draw_child(I,c,'##note_expression_lanes',canvas_width,expression_height,function()require('src.ui.expression_direct').draw(self);require('src.ui.controls').scroll_window(self)end,I.WindowFlags_NoScrollWithMouse)
+          local _,tools_y=I.GetCursorScreenPos(c)
+          LaneTools.draw(self,self.viewport.x,tools_y,self.viewport.w,tools_height)
+        else Canvas.draw(self)end
+      end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
       I.PopStyleVar(c)
+      if inspector_width>0 then
+        I.SameLine(c)
+        draw_child(I,c,'##selection_inspector',inspector_width,height,function()
+          -- Canvas actions can replace take userdata during this same frame.
+          if self.take and not Take.valid(self.take)then self:poll_take()end
+          Inspector.draw(self)
+        end)
+      end
     elseif self.empty_track then
       local width,height=I.GetContentRegionAvail(c); I.PushStyleVar(c,I.StyleVar_WindowPadding,0,0)
       draw_child(I,c,'##empty_piano_roll_workspace',width,height,function() Canvas.draw_empty(self,self.empty_track) end,I.WindowFlags_NoScrollbar|I.WindowFlags_NoScrollWithMouse)
@@ -323,7 +373,10 @@ function App:frame()
     else I.Dummy(c,1,70); I.TextDisabled(c,'Select a track or MIDI item to start sketching.'); I.TextDisabled(c,'On an empty selected track, click the grid to create a MIDI item using the configured bar length.') end
   end
   if visible then I.End(c) end
-  Toolbar.draw_chord_palette(self); KeyMapUI.draw(self); Appearance.draw(self); Help.draw(self); ShortcutUI.draw(self); if font_pushed then I.PopFont(c) end; I.PopStyleVar(c,5); I.PopStyleColor(c,18)
+
+  -- Group expression controls live in the main Expression panel.
+  require('src.ui.midi_exchange').draw(self)
+  Toolbar.draw_chord_palette(self); KeyMapUI.draw(self);require('src.ui.instrument_map').draw(self); Appearance.draw(self); Help.draw(self); ShortcutUI.draw(self); if font_pushed then I.PopFont(c) end; I.PopStyleVar(c,5); I.PopStyleColor(c,18)
   self.edit:flush()
   if self.open then reaper.defer(function() self:frame() end) else self:shutdown() end
 end

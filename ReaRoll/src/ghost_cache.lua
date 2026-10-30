@@ -32,8 +32,12 @@ function Ghost:rebuild(active_take,mode,visibility,revision)
     if take and reaper.TakeIsMIDI(take) then
       local track=reaper.GetMediaItemTrack(item); local color=U.track_color(track,nil)
       local _,count=reaper.MIDI_CountEvts(take)
+      local raw=reaper.MIDI_GetAllEvts and select(2,reaper.MIDI_GetAllEvts(take,''))
+      local logical
+      if raw and raw:find('REAROLL_OVERLAP',1,true)then local stream=require('src.note_events').read(take);logical=stream and stream.notes;if logical then count=#logical end end
       for i=0,count-1 do
         local ok,_,muted,s,e,chan,pitch,vel=reaper.MIDI_GetNote(take,i)
+        if logical then local n=logical[i+1];ok,muted,s,e,chan,pitch,vel=true,n.muted,n.s,n.e,n.chan,n.pitch,n.vel end
         if ok then self.notes[#self.notes+1]={source=source_index,item=item,take=take,track=track,color=color,s_qn=reaper.MIDI_GetProjQNFromPPQPos(take,s),e_qn=reaper.MIDI_GetProjQNFromPPQPos(take,e),pitch=pitch,vel=vel,chan=chan,muted=muted} end
       end
     end

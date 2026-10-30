@@ -25,25 +25,62 @@ end
 local function key(event)
   return (event.msg:byte(1)&15)..':'..event.msg:byte(2)..':'..(event.flags&3)
 end
+local function event_priority(event)
+  if event.original_ppq==event.ppq then return 1 end
+  return event.kind=='off'and 0 or event.kind=='on'and event.original_ppq~=nil and 2 or 1
+end
 local function ordered(a,b)
   if a.ppq~=b.ppq then return a.ppq<b.ppq end
-  local ap,bp=a.kind=='off' and 0 or 1,b.kind=='off' and 0 or 1
+  -- Keep original same-tick pedal/voice ordering for untouched events. Only
+  -- newly placed edges need the off-before-on policy for adjacent note pairs.
+  local ap,bp=event_priority(a),event_priority(b)
   if ap~=bp then return ap<bp end
   return a.order<b.order
 end
 local function copy_note(n)
-  return {index=n.index,s=n.s,e=n.e,chan=n.chan,pitch=n.pitch,vel=n.vel,muted=n.muted,selected=n.selected}
+  local names={};for _,value in pairs(require('src.note_articulations').get(n))do names[#names+1]=value.entry.name end;table.sort(names)
+  return {glide_setup=require('src.glide_setup').read(n),glide_channels=require('src.glide_connections').get(n),articulation_label=table.concat(names,', '),index=n.index,s=n.s,e=n.e,chan=n.chan,pitch=n.pitch,vel=n.vel,muted=n.muted,selected=n.selected}
 end
 Notes.copy_note=copy_note
 
-function Notes.read(take)
-  local ok,raw=reaper.MIDI_GetAllEvts(take,''); if not ok then return nil end
-  local self=setmetatable({take=take,events={},notes={},dirty=false},Notes)
+-- Deferred UI panels can outlive a take after item deletion or native Undo.
+-- Check the userdata before reading MIDI or take-owned pairing metadata.
+function Notes.available(take)
+  if take==nil then return false end
+  local ok,valid=pcall(function()
+    return (not reaper.ValidatePtr2 or reaper.ValidatePtr2(0,take,'MediaItem_Take*'))
+      and (not reaper.TakeIsMIDI or reaper.TakeIsMIDI(take))
+  end)
+  return ok and not not valid
+end
+function Notes.read(take,snapshot)
+  if not Notes.available(take)then return nil end
+  local ok,raw=true,snapshot
+  if raw==nil then ok,raw=reaper.MIDI_GetAllEvts(take,'')end
+  if not ok then return nil end
+  local physical=raw
+  local logical,overlap_config,overlap_error=require('src.overlap_storage').decode(raw)
+  if logical then raw=logical end
+  local self=setmetatable({take=take,events={},notes={},dirty=false,original_raw=physical,overlap_config=overlap_config,overlap_error=overlap_error},Notes)
   local position,pos=0,1
   while pos<=#raw do
     local offset,flags,msg,next_pos=string.unpack('i4Bs4',raw,pos)
     position=position+offset; pos=next_pos
-    self.events[#self.events+1]={ppq=position,flags=flags,msg=msg,kind=kind(msg),order=#self.events+1}
+    self.events[#self.events+1]={ppq=position,original_ppq=position,flags=flags,msg=msg,kind=kind(msg),order=#self.events+1}
+  end
+  local clean,attribute_error=require('src.note_articulations').strip(self.events)
+  self.attribute_error=attribute_error;if clean then self.events=clean end
+  -- REAPER terminates its source with a channel-1 All Notes Off marker.
+  -- Remember only the final raw event, not authored CC123 inside the item.
+  local tail=self.events[#self.events]
+  if tail and tail.msg==string.char(176,123,0)then self.source_end=tail
+  elseif tail and overlap_config then
+    -- Legacy saved scores may place the source terminator before a new final
+    -- note-off. Keep owning it so the next write puts it last again.
+    for i=#self.events,1,-1 do local event=self.events[i]
+      if event.ppq~=tail.ppq then break end
+      if event.flags==0 and event.msg==string.char(176,123,0)then self.source_end=event;break end
+    end
   end
   local chronological={}; for _,event in ipairs(self.events) do chronological[#chronological+1]=event end
   table.sort(chronological,ordered)
@@ -84,8 +121,10 @@ function Notes.read(take)
   local at_start={}
   for _,n in ipairs(self.notes) do at_start[n.s..':'..n.chan..':'..n.pitch]=n end
   for _,event in ipairs(self.events) do
-    if event.msg:sub(1,2)==string.char(0xFF,0x0F) then
+    if event.msg:sub(1,2)==string.char(0xFF,0x0F)or event.msg:sub(1,2)==string.char(0xFF,0x01)then
       local chan,pitch=event.msg:match('^..NOTE (%d+) (%d+) ')
+      if not chan and event.msg:sub(1,2)==string.char(255,1)then chan,pitch=event.msg:match('^..REAROLL_SLIDE (%d+) (%d+) ')end
+      if not chan then chan,pitch=event.msg:match('^..REAROLL_ATTR (%d+) (%d+) ')end
       local n=chan and at_start[event.ppq..':'..chan..':'..pitch]
       if n then n.notation[#n.notation+1]=event end
     end
@@ -107,7 +146,7 @@ function Notes:set(index,values)
     n.on.flags=(n.on.flags&~3)|flags; n.off.flags=(n.off.flags&~3)|flags
   end
   for _,event in ipairs(n.notation) do
-    event.ppq=n.s; event.msg=event.msg:gsub('^(..NOTE )%d+ %d+ ',function(prefix)return prefix..n.chan..' '..n.pitch..' ' end)
+    event.ppq=n.s; event.msg=event.msg:gsub('^(..NOTE )%d+ %d+ ',function(prefix)return prefix..n.chan..' '..n.pitch..' ' end):gsub('^(..REAROLL_ATTR )%d+ %d+ ',function(prefix)return prefix..n.chan..' '..n.pitch..' 'end):gsub('^(..REAROLL_SLIDE )%d+ %d+ ',function(prefix)return prefix..n.chan..' '..n.pitch..' 'end)
   end
   self.dirty=true; return true
 end
@@ -132,10 +171,39 @@ function Notes:delete(index)
   self.dirty=true; return true
 end
 
+-- Copy a note fragment without losing release velocity, event flags, extended
+-- MIDI payload or its associated notation. Unrelated events stay in the stream.
+function Notes:insert_fragment(source,s,e,pitch)
+  local index=self:insert(s,e,pitch,source.vel,source.chan,source.selected,source.muted)
+  local note=self.notes[index+1]
+  note.on.flags,note.off.flags=source.on.flags,source.off.flags
+  note.on.msg=source.on.msg:sub(1,1)..string.char(pitch)..source.on.msg:sub(3)
+  note.off.msg=source.off.msg:sub(1,1)..string.char(pitch)..source.off.msg:sub(3)
+  for _,event in ipairs(source.notation or {}) do
+    local msg=event.msg:gsub('^(..NOTE %d+ )%d+ ',function(prefix)return prefix..pitch..' ' end):gsub('^(..REAROLL_ATTR %d+ )%d+ ',function(prefix)return prefix..pitch..' 'end):gsub('^(..REAROLL_SLIDE %d+ )%d+ ',function(prefix)return prefix..pitch..' 'end)
+    local copy={ppq=note.s,flags=event.flags,msg=msg,order=#self.events+1}
+    self.events[#self.events+1]=copy; note.notation[#note.notation+1]=copy
+  end
+  return index
+end
+
 function Notes:write()
+  if self.attribute_error then return false,self.attribute_error end
+  if self.overlap_error then return false,self.overlap_error end
   if not self.dirty then return true end
+  if self.overlap_config and self.source_end then
+    local ending=self.source_end.ppq
+    for _,note in ipairs(self.notes)do ending=math.max(ending,note.e)end
+    self.source_end.ppq=ending
+  end
   local events={}; for _,event in ipairs(self.events) do if not event.deleted then events[#events+1]=event end end
-  table.sort(events,ordered)
+  local generated,notice=require('src.note_articulations').render_events(self)
+  if not generated then return false,notice end
+  for _,event in ipairs(generated)do events[#events+1]=event end
+  table.sort(events,function(a,b)
+    if a.ppq==b.ppq and(a==self.source_end)~=(b==self.source_end)then return b==self.source_end end
+    return ordered(a,b)
+  end)
   local chunks,position={},0
   for _,event in ipairs(events) do
     local offset=event.ppq-position
@@ -143,10 +211,18 @@ function Notes:write()
       local step=offset>0 and 0x7FFFFFFF or -0x80000000
       chunks[#chunks+1]=string.pack('i4Bs4',step,0,''); offset=offset-step
     end
+    event.written_index=#chunks+1
     chunks[#chunks+1]=string.pack('i4Bs4',offset,event.flags,event.msg)
     position=event.ppq
   end
   local raw=table.concat(chunks)
+  if self.overlap_config then
+    local playback,notice=require('src.overlap_glide').render(self,self.overlap_config)
+    if not playback then return false,notice end
+    local encoded;encoded,notice=require('src.overlap_storage').encode(raw,playback,self.overlap_config)
+    if not encoded then return false,notice end
+    raw=encoded
+  end
   -- Release any native DisableSort before writing our already sorted buffer.
   reaper.MIDI_Sort(self.take)
   if not reaper.MIDI_SetAllEvts(self.take,raw) then return false end

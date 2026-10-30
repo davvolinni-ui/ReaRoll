@@ -1,18 +1,22 @@
--- @description ReaRoll - compact sketching piano roll
--- @version 0.6.3-test
+-- @description ReaRoll - MIDI piano roll
+-- @version 0.7.0-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Add ReaRoll, REAPER, FL Studio, and Ableton Live input presets.
---   Add customizable note-grid mouse modifiers and a draw-mode shortcut.
---   Add configurable smooth wheel scrolling and anchored wheel zoom.
---   Improve MIDI take validation and editor interaction handling.
+--   Add overlap-driven mono glides and independent MPE chord glides.
+--   Add MPE voice allocation, per-note expression and multi-note curve editing.
+--   Edit multiple MIDI items in the original piano roll.
+--   Rework chord palettes, note painting, controller lanes and editing tools.
+--   Preserve controller and sustain context during supported note edits.
+--   Refine compact toolbars, mouse tooltips and floating-window recall.
+--   Fix note drawing, resizing and glide playback at MIDI item boundaries.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua
 --   [main] ReaRoll_Reset_Window.lua
 --   EULA.md
+--   THIRD_PARTY_NOTICES.md
 
 if not reaper.ImGui_GetBuiltinPath then
   reaper.MB('ReaRoll requires ReaImGui. Install it through ReaPack.', 'ReaRoll', 0)

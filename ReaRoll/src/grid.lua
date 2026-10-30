@@ -6,7 +6,9 @@ function M.resolve(px_per_qn)
   return step
 end
 function M.update(app)
-  if app.settings.adaptive_grid and not app.gesture and app.viewport.px_per_qn then
+  local multi=app.multi_notes
+  local editing=app.gesture or multi and (multi.transaction or multi.paint or multi.structure_brush or multi.mute_brush)
+  if app.settings.adaptive_grid and not editing and app.viewport.px_per_qn then
     app.settings.grid_qn=M.resolve(app.viewport.px_per_qn)
   end
 end

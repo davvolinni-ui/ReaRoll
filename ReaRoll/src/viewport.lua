@@ -142,7 +142,46 @@ function V:set_geometry(x,y,w,h,take,item_qn,item_end_qn)
   self.pitch_zoom_pending=nil
   self:remember_follow_view()
 end
-function V:set_fold(notes)
+function V:set_fold(notes,mapped_rows,scale_regions)
+  self.mapped=false
+  local scale_view=self.s.scale_view_only==true
+  local signature=scale_view and tostring(self.s.scale_root)..':'..tostring(self.s.scale_name) or nil
+  if signature then for _,r in ipairs(scale_regions or {})do signature=signature..'|'..r.root..':'..r.scale end end
+  if signature~=self.scale_view_signature then
+    local anchor=self.fold and self.fold[math.min(#self.fold,(self.s.fold_offset or 0)+1)] or self.s.low_pitch
+    self:cancel_scroll()
+    if scale_view and not self.scale_view_signature then self.used_fold_offset=self.s.fold_offset end
+    if not scale_view then self.s.fold_offset=self.used_fold_offset or 0 end
+    self.scale_view_anchor=anchor;self.scale_view_signature=signature
+    self.pitch_zoom_anchor=nil;self.pitch_zoom_pending=nil
+  end
+  if scale_view then
+    local Music=require 'src.music';local pitches={};self.fold_index={}
+    for p=0,127 do
+      local included=Music.contains(self.s.scale_root,self.s.scale_name,p)
+      if not included then for _,r in ipairs(scale_regions or {})do if Music.contains(r.root,r.scale,p)then included=true;break end end end
+      if included then pitches[#pitches+1]=p;self.fold_index[p]=#pitches end
+    end
+    self.fold=pitches
+    if self.scale_view_anchor then
+      local index=1;for i,p in ipairs(pitches)do if p<=self.scale_view_anchor then index=i end end
+      self.s.fold_offset=index-1;self.scale_view_anchor=nil
+    end
+    self.s.fold_offset=U.clamp(self.s.fold_offset or 0,0,math.max(0,#pitches-self:rows()))
+    return
+  end
+  if mapped_rows and #mapped_rows>0 then
+    local signature=table.concat(mapped_rows,',')
+    if signature~=self.mapped_signature then
+      self:cancel_scroll();if not self.mapped_signature then self.mapped_previous_offset=self.s.fold_offset end
+      self.s.fold_offset=math.max(0,#mapped_rows-math.floor(self.h/self.s.row_height));self.pitch_zoom_anchor=nil;self.mapped_signature=signature
+    end
+    self.fold=mapped_rows;self.fold_index={};self.mapped=true
+    for i,p in ipairs(mapped_rows)do self.fold_index[p]=i end
+    self.s.fold_offset=U.clamp(self.s.fold_offset or 0,0,math.max(0,#mapped_rows-self:rows()))
+    return
+  end
+  if self.mapped_signature then self:cancel_scroll();self.mapped_signature=nil;self.s.fold_offset=self.mapped_previous_offset or 0;self.mapped_previous_offset=nil end
   if not self.s.fold_enabled then self.fold,self.fold_index=nil,nil; return end
   local seen,pitches={},{}
   for _,n in ipairs(notes or {}) do if not seen[n.pitch] then seen[n.pitch]=true; pitches[#pitches+1]=n.pitch end end
@@ -150,6 +189,12 @@ function V:set_fold(notes)
   table.sort(pitches); self.fold=pitches; self.fold_index={}
   for i,p in ipairs(pitches) do self.fold_index[p]=i end
   self.s.fold_offset=U.clamp(self.s.fold_offset or 0,0,math.max(0,#pitches-self:rows()))
+end
+function V:shift_scale_pitch(p,steps)
+  if not (self.s.scale_view_only or self.mapped) or not self.fold_index then return U.clamp(p+steps,0,127)end
+  local index=self.fold_index[p]
+  if not index then return p end -- Hidden accidental notes retain their pitch.
+  return self.fold[U.clamp(index+steps,1,#self.fold)]
 end
 function V:x_from_ppq(p) return self.x+((p-self.ppq0)/self.ppq_per_qn)*self.px_per_qn end
 function V:ppq_from_x(x) return self.ppq0+((x-self.x)/self.px_per_qn)*self.ppq_per_qn end

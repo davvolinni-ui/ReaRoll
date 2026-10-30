@@ -6,6 +6,9 @@ local Grid=require 'src.grid'
 local Take=require 'src.take'
 local Shortcuts=require 'src.shortcuts'
 local Mouse=require 'src.mouse'
+local ControllerLanes=require 'src.controller_lanes'
+local Sources=require 'src.ui.editable_sources'
+local function edit_channel(s)if s.edit_all_channels==false then return s.channel or 0 end end
 local function positive(value,fallback)
   if type(value)~='number' or value~=value or value<=0 then return fallback or 1 end
   return value
@@ -201,7 +204,7 @@ local function selected_or_one(app,n)
   return Selection.list(app.selection,app.cache:get(true))
 end
 local function snapshot(notes)
-  local out={} for _,n in ipairs(notes) do out[#out+1]={note=n,index=n.index,s=n.s,e=n.e,pitch=n.pitch,vel=n.vel} end return out
+  local out={} for _,n in ipairs(notes) do out[#out+1]={note=n,index=n.index,s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan} end return out
 end
 local reselect
 local function divide_selection(app,direction)
@@ -215,13 +218,14 @@ local function divide_selection(app,direction)
   local plans,indices={},{ }
   for _,run in ipairs(runs) do
     local count=math.max(1,#run+(direction>0 and 1 or -1)); local first,last=run[1],run[#run]
-    if count~=#run then plans[#plans+1]={s=first.s,e=last.e,count=count,pitch=first.pitch,vel=first.vel,chan=first.chan,muted=first.muted}; for _,n in ipairs(run) do indices[#indices+1]=n.index end end
+    if count~=#run then plans[#plans+1]={s=first.s,e=last.e,count=count,pitch=first.pitch,vel=first.vel,chan=first.chan,muted=first.muted,source_index=first.index,end_index=last.index}; for _,n in ipairs(run) do indices[#indices+1]=n.index end end
   end
   if #plans==0 then return false end
-  app.edit:begin('ReaRoll: divide selected notes',app.take); app.edit:delete_indices(app.take,indices); local wanted={}
+  app.edit:begin('ReaRoll: divide selected notes',app.take);if not app.edit.replace_notes and app.edit.structural_guard and not app.edit:structural_guard(indices)then app.edit:cancel();return false end; local preserved={};if not app.edit.replace_notes then app.edit:delete_indices(app.take,indices,true)end; local wanted={}
   for _,p in ipairs(plans) do for i=1,p.count do local s=p.s+(p.e-p.s)*(i-1)/p.count; local e=p.s+(p.e-p.s)*i/p.count
-    app.edit:insert(app.take,s,e,p.pitch,p.vel,p.chan,true,p.muted); wanted[#wanted+1]={s=s,e=e,pitch=p.pitch,vel=p.vel}
+    if app.edit.replace_notes then preserved[#preserved+1]={s=s,e=e,pitch=p.pitch,source_index=p.source_index,end_index=p.end_index}else app.edit:insert(app.take,s,e,p.pitch,p.vel,p.chan,true,p.muted)end; wanted[#wanted+1]={s=s,e=e,pitch=p.pitch,vel=p.vel,chan=p.chan}
   end end
+  if app.edit.replace_notes and not app.edit:replace_notes(app.take,indices,preserved)then app.edit:cancel();return false end
   app.edit:finish(); app.cache:rebuild(); reselect(app,wanted); return true
 end
 local function glue_key(ppq,pitch,chan)return string.format('%.3f:%d:%d',ppq,pitch,chan or 0) end
@@ -278,6 +282,22 @@ local function collect_slice_marks(app,v,notes,g,mx,my,mods)
       end
     end
   end
+  -- A cut through a selected note applies at that time across the selection.
+  local selected_cuts={}
+  for _,mark in ipairs(encountered)do
+    if Selection.has(app.selection,mark.note.id)then selected_cuts[string.format('%.3f',mark.ppq)]=mark.ppq end
+  end
+  local unique={}; for _,mark in ipairs(encountered)do unique[mark.key]=mark end
+  for _,ppq in pairs(selected_cuts)do for _,n in ipairs(notes)do
+    if Selection.has(app.selection,n.id)and ppq>n.s+1 and ppq<n.e-1 then
+      local key=slice_key(n,ppq);unique[key]={key=key,note=n,ppq=ppq}
+    end
+  end end
+  if next(selected_cuts)then
+    -- Grouped cuts must not toggle each other off on subsequent held frames.
+    for key,mark in pairs(unique)do g.slices[key]=mark end
+    g.last_x,g.last_y=mx,my;return
+  end
   for _,mark in ipairs(encountered) do
     if mark.key~=g.last_candidate then
       if g.slices[mark.key] then g.slices[mark.key]=nil else g.slices[mark.key]=mark end
@@ -298,21 +318,24 @@ local function apply_glue(app,g)
     if #chain>1 then chains[#chains+1]=chain end
   end
   if #chains==0 then return end
-  local indices,plans={},{ }; for _,chain in ipairs(chains) do local first,last=chain[1],chain[#chain]; plans[#plans+1]={s=first.s,e=last.e,pitch=first.pitch,vel=first.vel,chan=first.chan,muted=first.muted}; for _,n in ipairs(chain) do indices[#indices+1]=n.index end end
-  app.edit:begin('ReaRoll: glue notes',app.take); app.edit:delete_indices(app.take,indices); local wanted={}
-  for _,p in ipairs(plans) do app.edit:insert(app.take,p.s,p.e,p.pitch,p.vel,p.chan,true,p.muted); wanted[#wanted+1]={s=p.s,e=p.e,pitch=p.pitch,vel=p.vel} end
+  local indices,plans={},{ }; for _,chain in ipairs(chains) do local first,last=chain[1],chain[#chain]; plans[#plans+1]={s=first.s,e=last.e,pitch=first.pitch,vel=first.vel,chan=first.chan,muted=first.muted,source_index=first.index,end_index=last.index}; for _,n in ipairs(chain) do indices[#indices+1]=n.index end end
+  app.edit:begin('ReaRoll: glue notes',app.take);if not app.edit.replace_notes and app.edit.structural_guard and not app.edit:structural_guard(indices)then app.edit:cancel();return false end; local preserved={};if not app.edit.replace_notes then app.edit:delete_indices(app.take,indices,true)end; local wanted={}
+  for _,p in ipairs(plans) do if app.edit.replace_notes then preserved[#preserved+1]=p else app.edit:insert(app.take,p.s,p.e,p.pitch,p.vel,p.chan,true,p.muted)end; wanted[#wanted+1]={s=p.s,e=p.e,pitch=p.pitch,vel=p.vel,chan=p.chan} end
+  if app.edit.replace_notes and not app.edit:replace_notes(app.take,indices,preserved)then app.edit:cancel();return false end
   app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
 end
 reselect=function(app,wanted)
   Selection.clear(app.selection); local used={}
   for _,w in ipairs(wanted) do
     local best,bestd
-    for _,n in ipairs(app.cache.notes) do if not used[n] and n.pitch==w.pitch and n.vel==w.vel then local d=math.abs(n.s-w.s)+math.abs(n.e-w.e); if not bestd or d<bestd then best,bestd=n,d end end end
+    for _,n in ipairs(app.cache.notes) do if not used[n] and n.pitch==w.pitch and n.vel==w.vel and (w.chan==nil or n.chan==w.chan) then local d=math.abs(n.s-w.s)+math.abs(n.e-w.e); if not bestd or d<bestd then best,bestd=n,d end end end
     if best then used[best]=true; Selection.add(app.selection,best.id) end
   end
 end
 
-local function chord_pitches(app,root)
+local function chord_pitches(app,root,q)
+  if not q and app.harmony_regions and app.harmony_regions.enabled then q=reaper.TimeMap2_timeToQN(0,reaper.GetCursorPosition())end
+  if q then return require('src.harmony_regions').chord(app,q,root)end
   return app.music.chord_pitches(app.settings,root)
 end
 
@@ -323,6 +346,7 @@ end
 
 local function source_timeline_bounds(app)
   local first,last=app.item_start_qn,app.item_end_qn
+  if app.multi_edit_mode then return Sources.bounds(app)end
   if not app.settings.ghost_enabled then return first,last end
   local active_track=Take.track(app.take)
   if active_track then
@@ -363,13 +387,26 @@ local function draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
     local row_color=p%12==0 and T.c_row or (black and T.row_alt or T.row)
     if s.scale_enabled and app.music.contains(s.scale_root,s.scale_name,p) then row_color=(p-s.scale_root)%12==0 and T.root_row or T.scale_row end
     I.DrawList_AddRectFilled(d,v.x,math.max(y,v.y),v.x+v.w,math.min(y+s.row_height,v.y+v.h),row_color)
+    if s.scale_enabled and app.harmony_regions and app.harmony_regions.enabled then
+      for _,region in ipairs(app.harmony_regions.regions)do
+        local left,right=math.max(v.x,v:x_from_qn(region.start_qn)),math.min(v.x+v.w,v:x_from_qn(region.end_qn))
+        if right>left then
+          local color=p%12==0 and T.c_row or (black and T.row_alt or T.row)
+          if app.music.contains(region.root,region.scale,p)then color=(p-region.root)%12==0 and T.root_row or T.scale_row end
+          I.DrawList_AddRectFilled(d,left,math.max(y,v.y),right,math.min(y+s.row_height,v.y+v.h),color)
+        end
+      end
+    end
+    if app.input_notes and app.input_notes[p]then I.DrawList_AddRectFilled(d,v.x,math.max(y,v.y),v.x+v.w,math.min(y+s.row_height,v.y+v.h),(T.accent&0xFFFFFF00)|36)end
     local key={pitch=p,top=math.max(y,v.y),bottom=math.min(y+s.row_height,v.y+v.h),center=y+s.row_height*.5,black=black}
     if black then black_keys[#black_keys+1]=key else white_keys[#white_keys+1]=key end
     I.DrawList_AddLine(d,v.x,y+s.row_height,v.x+v.w,y+s.row_height,black and T.grid_soft or T.grid)
     end
   end
 
-  local item_x1,item_x2=v:x_from_qn(app.item_start_qn),v:x_from_qn(app.item_end_qn)
+  local first,last=app.item_start_qn,app.item_end_qn
+  if app.multi_edit_mode then first,last=Sources.bounds(app)end
+  local item_x1,item_x2=v:x_from_qn(first),v:x_from_qn(last)
   local shade=T.outside_item or 0x090D12A8; local edge=T.item_edge or T.accent
   local left=U.clamp(item_x1,v.x,v.x+v.w); local right=U.clamp(item_x2,v.x,v.x+v.w)
   if left>v.x then I.DrawList_AddRectFilled(d,v.x,v.y,left,v.y+v.h,shade) end
@@ -377,91 +414,7 @@ local function draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
   if item_x1>=v.x and item_x1<=v.x+v.w then I.DrawList_AddLine(d,item_x1,y0,item_x1,v.y+v.h,edge,2.4) end
   if item_x2>=v.x and item_x2<=v.x+v.w then I.DrawList_AddLine(d,item_x2,y0,item_x2,v.y+v.h,edge,2.4) end
 
-  if v.fold then
-    -- Fold mode is an arbitrary pitch list, so preserve one honest key per row.
-    for _,key in ipairs(white_keys) do
-      local color=key.pitch%12==0 and T.c_key or T.white_key
-      local top_color=key.pitch%12==0 and T.c_key_top or T.white_key_top
-      I.DrawList_AddRectFilledMultiColor(d,x0,key.top,v.x-1,key.bottom,top_color,top_color,color,color)
-      I.DrawList_AddLine(d,x0,key.bottom,v.x-1,key.bottom,T.key_border)
-    end
-  else
-    -- White keys own the space halfway to the next visible white-key centre.
-    -- Accidentals are then laid over those bodies, like a physical keyboard.
-    for i,key in ipairs(white_keys) do
-      key.top=i==1 and v.y or (white_keys[i-1].center+key.center)*.5
-      key.bottom=i==#white_keys and v.y+v.h or (key.center+white_keys[i+1].center)*.5
-      local color=key.pitch%12==0 and T.c_key or T.white_key
-      local top_color=key.pitch%12==0 and T.c_key_top or T.white_key_top
-      I.DrawList_AddRectFilledMultiColor(d,x0,key.top,v.x-1,key.bottom,top_color,top_color,color,color)
-      I.DrawList_AddLine(d,x0,key.bottom,v.x-1,key.bottom,T.key_border)
-    end
-  end
-
-  -- A highlighted white key remains behind the raised accidentals.
-  if hover_pitch and not U.is_black(hover_pitch) then
-    for _,key in ipairs(white_keys) do
-      if key.pitch==hover_pitch then
-        I.DrawList_AddRectFilled(d,x0,key.top,v.x-1,key.bottom,T.key_hover)
-        I.DrawList_AddRect(d,x0,key.top,v.x-1,key.bottom,T.selected_edge,0,I.DrawFlags_None,1)
-        break
-      end
-    end
-  end
-  -- White-key selection belongs below the raised black keys.
-  if app.key_mapping_mode and app.key_map_selection then
-    for _,key in ipairs(white_keys) do if app.key_map_selection[key.pitch] then I.DrawList_AddRect(d,x0,key.top,v.x-1,key.bottom,T.selected_edge,0,I.DrawFlags_None,2) end end
-  end
-
-  for _,key in ipairs(black_keys) do
-    local top,bottom
-    if v.fold then top,bottom=key.top,key.bottom
-    else
-      local half=math.max(2,s.row_height*.43)
-      top,bottom=math.max(v.y,key.center-half),math.min(v.y+v.h,key.center+half)
-    end
-    local right=x0+key_w*.64
-    local right_corners=I.DrawFlags_RoundCornersRight or I.DrawFlags_None
-    I.DrawList_AddRectFilled(d,x0,top,right,bottom,T.black_key,2,right_corners)
-    I.DrawList_AddLine(d,x0+1,top+1,right-2,top+1,T.black_key_top,1)
-    I.DrawList_AddRect(d,x0,top,right,bottom,T.key_border,2,right_corners,1)
-    key.top,key.bottom,key.right=top,bottom,right
-  end
-  -- Black-key hover belongs above the black-key layer itself.
-  if hover_pitch and U.is_black(hover_pitch) then
-    for _,key in ipairs(black_keys) do
-      if key.pitch==hover_pitch then
-        local right_corners=I.DrawFlags_RoundCornersRight or I.DrawFlags_None
-        I.DrawList_AddRectFilled(d,x0,key.top,key.right,key.bottom,T.key_hover,2,right_corners)
-        I.DrawList_AddRect(d,x0,key.top,key.right,key.bottom,T.selected_edge,2,right_corners,1)
-        break
-      end
-    end
-  end
-
-  -- Pitch maps color only a compact section of each key. Note bodies retain
-  -- their channel colors and the piano's black/white geometry stays legible.
-  for _,keys in ipairs({white_keys,black_keys}) do
-    for _,key in ipairs(keys) do
-      local right=key.right or v.x-1; local color=app.key_colors and app.key_colors[key.pitch]
-      if color then
-        local strip=math.max(6,math.min(10,(right-x0)*.18))
-        I.DrawList_AddRectFilled(d,right-strip,key.top+1,right,key.bottom-1,color,key.black and 2 or 0)
-      end
-      if key.black and app.key_mapping_mode and app.key_map_selection and app.key_map_selection[key.pitch] then
-        I.DrawList_AddRect(d,x0,key.top,right,key.bottom,T.selected_edge,key.black and 2 or 0,I.DrawFlags_None,2)
-      end
-    end
-  end
-
-  for _,key in ipairs(white_keys) do
-    local custom=app.note_label and app:note_label(key.pitch) or nil
-    if (custom or v.fold or key.pitch%12==0) and s.row_height>=11 then
-      local label=custom or U.pitch_name(key.pitch); if #label>12 then label=label:sub(1,12) end
-      local tw,th=I.CalcTextSize(c,label); th=th or math.min(s.row_height,key.bottom-key.top)
-      I.DrawList_AddText(d,v.x-tw-4,(key.top+key.bottom-th)*.5,T.black_key,label)
-    end
-  end
+  require('src.ui.piano_keys').draw(app,d,v,x0,key_w,white_keys,black_keys,hover_pitch)
   -- Keep the visual grid useful at every zoom level without changing the
   -- user's actual snap resolution. Dense divisions progressively coalesce.
   local visual_grid=s.grid_qn
@@ -553,6 +506,7 @@ local function note_display_color(color,background,ghost)
   return contrast_color(color,background,ghost and (light and 44 or 36) or (light and 58 or 48))
 end
 local function live_overlap_shape(app,n)
+  if app.edit and app.edit.active and app.edit.active.stream and app.edit.active.stream.overlap_config then return n end
   local g=app.gesture
   if not app.settings.prevent_overlaps or not g or not g.items or (g.kind~='move' and g.kind~='resize' and g.kind~='stretch') then return n end
   for _,a in ipairs(g.items) do if a.index==n.index then return n end end
@@ -594,11 +548,11 @@ local function draw_notes(app,d,v,notes,hover,play_ppq)
   for _,n in ipairs(notes) do if (n.chan or 0)==(s.channel or 0) then ordered[#ordered+1]=n end end
   for _,n in ipairs(ordered) do
     local x1,y1,x2,y2=live_note_rect(app,v,n,s.row_height)
-    local sel=Selection.has(app.selection,n.id)
+    local sel=n.source_selected or Selection.has(app.selection,n.id)
     if x1 and marquee_hits(app.gesture,x1,y1,x2,y2) then sel=true end
     if x1 then
-    local row_background=note_row_background(app,n.pitch); local channel_col=track_col
-    local active=(n.chan or 0)==(s.channel or 0); local velocity_col=note_display_color(U.color_scale(channel_col,.72+.28*(n.vel/127)),row_background,false); local col=n.muted and T.muted or (hover==n and U.color_scale(velocity_col,1.18) or velocity_col)
+    local row_background=note_row_background(app,n.pitch); local owner_color=n.source and U.track_color(Take.track(n.source.take),T.note)or track_col; local channel_col=require('src.note_colors').base(s,T,n,owner_color)
+    local active=(not n.source or not n.source.readonly)and(s.edit_all_channels~=false or (n.chan or 0)==(s.channel or 0)); local velocity_col=note_display_color(U.color_scale(channel_col,.72+.28*(n.vel/127)),row_background,false); local col=n.muted and T.muted or (hover==n and U.color_scale(velocity_col,1.18) or velocity_col)
     local playback_intensity,playback_progress,sustain_breathe=0,nil,0
     if play_ppq and not n.muted then
       local release=math.max(1,v.ppq_per_qn*.055)
@@ -655,14 +609,16 @@ local function draw_notes(app,d,v,notes,hover,play_ppq)
       if right-left>=28 and bottom-top>=11 then
         local label=U.pitch_name(n.pitch); if right-left>=62 then label=label..'  v'..tostring(n.vel) end
         local text_col=body_luminance>130 and 0x101820FF or 0xF0F3F7FF
+        I.DrawList_PushClipRect(d,left,top,right,bottom,true)
         I.DrawList_AddText(d,left+4,top+1,sel and T.selected_text or text_col,label)
+        I.DrawList_PopClipRect(d)
       end
     end end
   end
 end
 
 local function draw_ghost_notes(app,d,v,mx,my)
-  if not app.settings.ghost_enabled then return nil end
+  if app.multi_edit_mode or not app.settings.ghost_enabled then return nil end
   local I,T,s=app.ImGui,app.theme,app.settings
   local hit,best_area=nil,math.huge
   for _,n in ipairs(app.ghost:get(app.take,s.ghost_mode,app.gesture~=nil,app.source_visibility,app.source_revision)) do
@@ -680,25 +636,31 @@ end
 local function draw_placement_preview(app,d,v,mx,my,hover)
   local I,T,s=app.ImGui,app.theme,app.settings
   local length=Grid.note_length(s)
-  if app.gesture or hover or s.mode=='slice' or s.mode=='glue' or mx<v.x or mx>v.x+v.w or my<v.y or my>v.y+v.h then return end
-  local raw_q=v:qn_from_x(mx); local q=U.snap_time(s,raw_q)
-  q=U.clamp(q,app.item_start_qn,math.max(app.item_start_qn,(app.item_end_qn or q+length)-length))
-  local hover_pitch=v:pitch_from_y(my); local root=hover_pitch; if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
-  local pitches=s.mode=='chord' and chord_pitches(app,root) or {root}
+  if app.gesture or hover or s.mode=='razor' or s.mode=='slice' or s.mode=='glue' or mx<v.x or mx>v.x+v.w or my<v.y or my>v.y+v.h then return end
+  local raw_q=v:qn_from_x(mx); local alt=I.IsKeyDown(app.ctx,I.Mod_Alt); local q=alt and raw_q or U.snap_time(s,raw_q)
+  q=math.max(app.item_start_qn,q)
+  if q>=app.item_end_qn then return end
+  local hover_pitch=v:pitch_from_y(my); local root=hover_pitch; if s.scale_snap then root=require('src.harmony_regions').snap(app,q,root) end
+  local pitches=s.mode=='chord' and chord_pitches(app,root,q) or {root}
+  if s.mode=='chord'and app.harmony_stamp then root=app.harmony_stamp.root end
   local x1,x2=math.max(v.x,v:x_from_qn(q)),math.min(v.x+v.w,v:x_from_qn(q+length))
-  local channel_col=s.uniform_note_color and T.note or (T.channel_colors[(s.channel or 0)+1] or T.note); local velocity_col=U.color_scale(channel_col,.72+.28*(s.velocity/127))
-  local preview_fill=(velocity_col&0xFFFFFF00)|0x66; local preview_edge=(U.color_scale(velocity_col,1.18)&0xFFFFFF00)|0xCC
-  for _,pitch in ipairs(pitches) do if v:is_pitch_visible(pitch) then local y=v:y_from_pitch(pitch); I.DrawList_AddRectFilled(d,x1+1,y+1,x2-1,y+s.row_height-2,preview_fill,3); I.DrawList_AddRect(d,x1+1,y+1,x2-1,y+s.row_height-2,preview_edge,3,I.DrawFlags_None,1) end end
+  local track_col=U.track_color(Take.track(app.take),T.note)
+  for _,pitch in ipairs(pitches)do if v:is_pitch_visible(pitch)then
+    local base=require('src.note_colors').base(s,T,{pitch=pitch,chan=s.channel or 0,vel=s.velocity},track_col)
+    local color=U.color_scale(base,.72+.28*(s.velocity/127));local y=v:y_from_pitch(pitch)
+    I.DrawList_AddRectFilled(d,x1+1,y+1,x2-1,y+s.row_height-2,(color&0xFFFFFF00)|0x66,3)
+    I.DrawList_AddRect(d,x1+1,y+1,x2-1,y+s.row_height-2,(U.color_scale(color,1.18)&0xFFFFFF00)|0xCC,3,I.DrawFlags_None,1)
+  end end
   if s.mode=='chord' then
     local anchor_present=false; for _,pitch in ipairs(pitches) do if pitch==hover_pitch then anchor_present=true; break end end
-    if not anchor_present and v:is_pitch_visible(hover_pitch) then
+    if not app.harmony_stamp and not anchor_present and v:is_pitch_visible(hover_pitch) then
       -- Inversions can move every sounding note away from the pointer pitch.
       -- Keep a hollow note under the mouse to show the non-inserted anchor.
       local anchor_y=v:y_from_pitch(hover_pitch)
       I.DrawList_AddRect(d,x1+1,anchor_y+1,x2-1,anchor_y+s.row_height-2,T.hint,3,I.DrawFlags_None,1.5)
     end
   end
-  I.DrawList_AddText(d,U.clamp(mx+12,v.x,v.x+v.w-110),U.clamp(my+10,v.y,v.y+v.h-18),T.preview_text,U.pitch_name(root)..'  Vel '..tostring(s.velocity)..'  Ch '..tostring((s.channel or 0)+1))
+  if s.note_mouse_info~=false then I.DrawList_AddText(d,U.clamp(mx+12,v.x,v.x+v.w-110),U.clamp(my+10,v.y,v.y+v.h-18),T.preview_text,U.pitch_name(root)..'  Vel '..tostring(s.velocity)..'  Ch '..tostring((s.channel or 0)+1)) end
 end
 
 local function draw_selection_bounds(app,d,v,notes,mx,my,all_notes)
@@ -712,10 +674,32 @@ local function draw_selection_bounds(app,d,v,notes,mx,my,all_notes)
   return (mx-hx)^2+(my-hy)^2<=64
 end
 
+local function common_shortcuts(app,mods)
+  if Shortcuts.pressed(app,'quantize',mods) then app.transforms.quantize(app,false) end
+  if Shortcuts.pressed(app,'legato',mods) then app.transforms.legato(app) end
+  if Shortcuts.pressed(app,'snap',mods) then local mode=U.snap_mode(app.settings); app.settings.snap_mode=mode=='off' and 'absolute' or mode=='absolute' and 'relative' or 'off'; app.settings.snap_enabled=app.settings.snap_mode~='off' end
+  if Shortcuts.pressed(app,'fit_width',mods) then app:fit_time() end
+  if Shortcuts.pressed(app,'fit_height',mods) then app:fit_pitches() end
+  if Shortcuts.pressed(app,'fit_selection',mods) then app:fit_selection() end
+  if Shortcuts.pressed(app,'zoom_in',mods) then app:zoom_time(.82,app.viewport.x+app.viewport.w*.5) end
+  if Shortcuts.pressed(app,'zoom_out',mods) then app:zoom_time(1.22,app.viewport.x+app.viewport.w*.5) end
+  for action,mode in pairs({tool_smart='smart',tool_paint='paint',tool_select='select',tool_slice='slice',tool_mute='mute',tool_chord='chord'}) do if Shortcuts.pressed(app,action,mods) then require('src.midi_mode').tool(app,mode) end end
+  if Shortcuts.pressed(app,'draw_mode',mods)then require('src.midi_mode').tool(app,app.settings.mode=='paint'and 'smart'or 'paint')end
+  if Shortcuts.pressed(app,'play',mods) then reaper.Main_OnCommand(40044,0) end
+  for slot=1,4 do if Shortcuts.pressed(app,'reaper_action_'..slot,mods) then
+    local command=tostring(app.settings['reaper_action_'..slot] or '')
+    local id=tonumber(command) or (command~='' and reaper.NamedCommandLookup(command) or 0)
+    if id and id~=0 then reaper.Main_OnCommand(id,0) else app.transform_notice='REAPER action slot '..slot..' is not configured.' end
+  end end
+end
+
 local function keyboard_shortcuts(app,take,notes)
   local I,c=app.ImGui,app.ctx; if not I.IsWindowFocused(c,I.FocusedFlags_RootAndChildWindows) then return end
-  if I.IsAnyItemActive(c) or app.gesture then return end
+  if I.IsAnyItemActive(c) or app.gesture or LaneTools.any_popup_open(app) then return end
   local mods=U.mods(I,c)
+  common_shortcuts(app,mods)
+  if app.multi_edit_mode and app.controller_selection_active and (not Sources.current_source(app)or Sources.current_source(app).readonly)then return end
+  if app.multi_edit_mode and not app.controller_selection_active then Sources.keys(app);return end
   if Shortcuts.pressed(app,'undo',mods) then
     if app.lane_tool_preview then LaneTools.cancel(app) end
     if app.transform_preview then app.transforms.cancel_preview(app) end
@@ -740,19 +724,10 @@ local function keyboard_shortcuts(app,take,notes)
     local chosen=Selection.list(app.selection,app.cache:get(false)); if #chosen>0 then
       app.edit:begin('ReaRoll: duplicate octave',take); local wanted={}
       for _,n in ipairs(chosen) do local pitch=U.clamp(n.pitch+direction,0,127); app.edit:insert(take,n.s,n.e,pitch,n.vel,n.chan,true,n.muted); wanted[#wanted+1]={s=n.s,e=n.e,pitch=pitch,vel=n.vel} end
+      if app.edit.active and app.edit.active.collecting then app.edit:end_group()end
       app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
     end
   end
-  if Shortcuts.pressed(app,'quantize',mods) then app.transforms.quantize(app,false) end
-  if Shortcuts.pressed(app,'legato',mods) then app.transforms.legato(app) end
-  if Shortcuts.pressed(app,'snap',mods) then local mode=U.snap_mode(app.settings); app.settings.snap_mode=mode=='off' and 'absolute' or mode=='absolute' and 'relative' or 'off'; app.settings.snap_enabled=app.settings.snap_mode~='off' end
-  if Shortcuts.pressed(app,'fit_width',mods) then app:fit_time() end
-  if Shortcuts.pressed(app,'fit_height',mods) then app:fit_pitches() end
-  if Shortcuts.pressed(app,'fit_selection',mods) then app:fit_selection() end
-  if Shortcuts.pressed(app,'zoom_in',mods) then app:zoom_time(.82,app.viewport.x+app.viewport.w*.5) end
-  if Shortcuts.pressed(app,'zoom_out',mods) then app:zoom_time(1.22,app.viewport.x+app.viewport.w*.5) end
-  for action,mode in pairs({tool_smart='smart',tool_paint='paint',tool_select='select',tool_slice='slice',tool_mute='mute',tool_chord='chord'}) do if Shortcuts.pressed(app,action,mods) then app.settings.mode=mode end end
-  if Shortcuts.pressed(app,'draw_mode',mods) then app.settings.mode=app.settings.mode=='paint' and 'smart' or 'paint' end
   local qn_delta,pitch_delta=0,0
   local resize_delta,velocity_delta=0,0
   if Shortcuts.pressed(app,'nudge_left',mods) then qn_delta=-app.settings.grid_qn elseif Shortcuts.pressed(app,'nudge_right',mods) then qn_delta=app.settings.grid_qn
@@ -764,7 +739,9 @@ local function keyboard_shortcuts(app,take,notes)
     local chosen=Selection.list(app.selection,app.cache:get(false))
     if #chosen>0 then
       app.edit:begin('ReaRoll: nudge notes',take); local ppq_delta=qn_delta~=0 and qn_delta*((reaper.MIDI_GetPPQPosFromProjQN(take,app.settings.start_qn+1)-reaper.MIDI_GetPPQPosFromProjQN(take,app.settings.start_qn))) or 0; local wanted={}
-      for _,n in ipairs(chosen) do local p=U.clamp(n.pitch+pitch_delta,0,127); app.edit:set(n.index,take,n.s+ppq_delta,n.e+ppq_delta,p,nil); wanted[#wanted+1]={s=n.s+ppq_delta,e=n.e+ppq_delta,pitch=p,vel=n.vel} end
+      app.edit:begin_group()
+      for _,n in ipairs(chosen) do local p=(app.settings.scale_view_only or app.viewport.mapped) and math.abs(pitch_delta)==1 and app.viewport:shift_scale_pitch(n.pitch,pitch_delta) or U.clamp(n.pitch+pitch_delta,0,127); app.edit:set(n.index,take,n.s+ppq_delta,n.e+ppq_delta,p,nil); wanted[#wanted+1]={s=n.s+ppq_delta,e=n.e+ppq_delta,pitch=p,vel=n.vel,chan=n.chan} end
+      if app.edit.active and app.edit.active.collecting then app.edit:end_group()end
       app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
     end
   end
@@ -772,19 +749,17 @@ local function keyboard_shortcuts(app,take,notes)
     local chosen=Selection.list(app.selection,app.cache:get(false)); if #chosen>0 then
       local ppq_grid=(reaper.MIDI_GetPPQPosFromProjQN(take,app.settings.start_qn+1)-reaper.MIDI_GetPPQPosFromProjQN(take,app.settings.start_qn))*resize_delta
       app.edit:begin(resize_delta~=0 and 'ReaRoll: resize notes' or 'ReaRoll: adjust velocity',take); local wanted={}
-      for _,n in ipairs(chosen) do local ending=resize_delta~=0 and math.max(n.s+1,n.e+ppq_grid) or n.e; local vel=velocity_delta~=0 and U.clamp(n.vel+velocity_delta,1,127) or n.vel; app.edit:set(n.index,take,nil,ending,nil,vel); wanted[#wanted+1]={s=n.s,e=ending,pitch=n.pitch,vel=vel} end
+      app.edit:begin_group()
+      for _,n in ipairs(chosen) do local ending=resize_delta~=0 and math.max(n.s+1,n.e+ppq_grid) or n.e; local vel=velocity_delta~=0 and U.clamp(n.vel+velocity_delta,1,127) or n.vel; app.edit:set(n.index,take,nil,ending,nil,vel); wanted[#wanted+1]={s=n.s,e=ending,pitch=n.pitch,vel=vel,chan=n.chan} end
+      if app.edit.active and app.edit.active.collecting then app.edit:end_group()end
       app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
     end
   end
-  if Shortcuts.pressed(app,'play',mods) then reaper.Main_OnCommand(40044,0) end
-  for slot=1,4 do if Shortcuts.pressed(app,'reaper_action_'..slot,mods) then
-    local command=tostring(app.settings['reaper_action_'..slot] or '')
-    local id=tonumber(command) or (command~='' and reaper.NamedCommandLookup(command) or 0)
-    if id and id~=0 then reaper.Main_OnCommand(id,0) else app.transform_notice='REAPER action slot '..slot..' is not configured.' end
-  end end
+
 end
 
 local function delete_selected(app)
+  if app.multi_edit_mode then return Sources.edit(app,'delete')end
   local list=Selection.list(app.selection,app.cache:get(false)); if #list==0 then return false end
   app.edit:begin('ReaRoll: delete notes',app.take); local ids={}
   for _,n in ipairs(list) do ids[#ids+1]=n.index end
@@ -792,6 +767,7 @@ local function delete_selected(app)
 end
 
 local function mute_selected(app,target)
+  if app.multi_edit_mode then return Sources.edit(app,'properties',{muted=target})end
   local list=Selection.list(app.selection,app.cache:get(false)); if #list==0 then return false end
   app.edit:begin(target and 'ReaRoll: mute notes' or 'ReaRoll: unmute notes',app.take)
   for _,n in ipairs(list) do app.edit:set_muted(app.take,n.index,target) end
@@ -802,7 +778,7 @@ local function note_context(app)
   local I,c=app.ImGui,app.ctx
   if I.BeginPopup(c,'##note_context') then
     local count=Selection.count(app.selection); I.TextDisabled(c,string.format('%d note%s',count,count==1 and '' or 's')); I.Separator(c)
-    if I.MenuItem(c,'Duplicate') then app.clipboard.duplicate(app) end
+    if I.MenuItem(c,'Duplicate') then if app.multi_edit_mode then Sources.duplicate(app)else app.clipboard.duplicate(app)end end
     if I.MenuItem(c,'Mute') then mute_selected(app,true) end
     if I.MenuItem(c,'Unmute') then mute_selected(app,false) end
     if I.MenuItem(c,'Delete') then delete_selected(app) end
@@ -820,10 +796,11 @@ local function note_properties(app)
     changed,app.property_channel=I.SliderInt(c,'MIDI channel',app.property_channel or 1,1,16)
     changed,app.property_muted=I.Checkbox(c,'Muted',app.property_muted or false)
     if I.Button(c,'Apply',100,0) then
+      if app.multi_edit_mode then Sources.edit(app,'properties',{velocity=app.property_velocity,channel=(app.property_channel or 1)-1,muted=app.property_muted})else
       local chosen=Selection.list(app.selection,app.cache:get(false)); if #chosen>0 then app.edit:begin('ReaRoll: note properties',app.take); local wanted={}
         for _,n in ipairs(chosen) do local channel=(app.property_channel or 1)-1; app.edit:set_properties(app.take,n.index,{muted=app.property_muted,chan=channel,vel=app.property_velocity}); wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=app.property_velocity} end
         app.edit:finish(); app.cache:rebuild(); app:reselect_notes(wanted)
-      end; I.CloseCurrentPopup(c)
+      end end; I.CloseCurrentPopup(c)
     end
     I.SameLine(c); if I.Button(c,'Cancel',100,0) then I.CloseCurrentPopup(c) end
     I.EndPopup(c)
@@ -929,29 +906,20 @@ local function draw_scrollbars(app,d,v,gx,gy,grid_h,vy,lane_h,hbar_h,vbar_w,mx,m
   if I.IsItemHovered(c) then local wheel=I.GetMouseWheel(c); if wheel~=0 then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,v.y+v.h*.5) end; I.SetTooltip(c,'Drag vertically or use the wheel to zoom note height') end
 end
 
-local cc_names={[0]='Bank Select MSB',[1]='Mod Wheel',[2]='Breath',[3]='Controller 3',[4]='Foot Controller',[5]='Portamento Time',[6]='Data Entry MSB',[7]='Channel Volume',[8]='Balance',[9]='Controller 9',[10]='Pan',[11]='Expression',[12]='Effect Control 1',[13]='Effect Control 2',[16]='General Purpose 1',[17]='General Purpose 2',[18]='General Purpose 3',[19]='General Purpose 4',[32]='Bank Select LSB',[38]='Data Entry LSB',[64]='Sustain',[65]='Portamento',[66]='Sostenuto',[67]='Soft Pedal',[68]='Legato Footswitch',[69]='Hold 2',[70]='Sound Variation',[71]='Resonance',[72]='Release Time',[73]='Attack Time',[74]='Brightness',[75]='Decay Time',[76]='Vibrato Rate',[77]='Vibrato Depth',[78]='Vibrato Delay',[79]='Sound Controller 10',[80]='General Purpose 5',[81]='General Purpose 6',[82]='General Purpose 7',[83]='General Purpose 8',[84]='Portamento Control',[91]='Reverb Send',[92]='Tremolo Depth',[93]='Chorus Send',[94]='Celeste Depth',[95]='Phaser Depth',[96]='Data Increment',[97]='Data Decrement',[98]='NRPN LSB',[99]='NRPN MSB',[100]='RPN LSB',[101]='RPN MSB',[120]='All Sound Off',[121]='Reset Controllers',[122]='Local Control',[123]='All Notes Off',[124]='Omni Off',[125]='Omni On',[126]='Mono Mode',[127]='Poly Mode'}
+local cc_names=ControllerLanes.names
 local lane_defs={velocity={label='Note-on Velocity',short='VEL'},cc={label='Other MIDI CC...',short='CC'},pitch={label='Pitch Bend',short='PB',pitch=true},pressure={label='Channel Aftertouch (Pressure)',short='AT',status=0xD0},program={label='Program Change',short='PC',status=0xC0,discrete=true}}
-local cc_short={[1]='Mod',[7]='Volume',[10]='Pan',[11]='Expr',[64]='Sustain',[74]='Bright',[91]='Reverb',[93]='Chorus'}
+local cc_short=ControllerLanes.short_names
 local lane_order={'velocity','pitch','pressure','program','cc1','cc2','cc4','cc7','cc10','cc11','cc64','cc65','cc66','cc67','cc71','cc72','cc73','cc74','cc91','cc93','cc'}
-local function cc_traits(cc)
-  return (cc==8 or cc==10) and 64 or nil,cc>=64 and cc<=69,cc>=96 and cc<=101,cc>=120
-end
 local function lane_definition(s)
-  local def=lane_defs[s.lane_target]
-  local named=type(s.lane_target)=='string' and s.lane_target:match('^cc(%d+)$')
-  if named then local cc=tonumber(named); local center,switch,discrete,protected=cc_traits(cc); return {label=(cc_names[cc] or 'Controller')..' (CC '..cc..')',short=cc_short[cc] or ('CC '..cc),cc=cc,center=center,switch=switch,discrete=discrete,protected=protected} end
-  if def==lane_defs.cc then local cc=U.clamp(math.floor(s.cc_number or 1),0,127); local center,switch,discrete,protected=cc_traits(cc); return {label=(cc_names[cc] or 'Controller')..' (CC '..cc..')',short=cc_short[cc] or ('CC '..cc),cc=cc,center=center,switch=switch,discrete=discrete,protected=protected} end
-  return def
+  return require('src.controller_lanes').definition(s,cc_names,cc_short)
 end
 
 local function lane_matches_event(lane,event,channel)
-  if not event or event.chan~=channel then return false end
-  return lane.pitch and event.chanmsg==0xE0
-    or lane.status and event.chanmsg==lane.status
-    or lane.cc~=nil and event.chanmsg==0xB0 and event.msg2==lane.cc
+  return require('src.controller_lanes').matches(lane,event,channel)
 end
 
 local function adjust_note_property(app,note,wheel)
+  if app.multi_edit_mode then return Sources.adjust(app,note,wheel)end
   local lane=lane_definition(app.settings); local delta=wheel>0 and 1 or -1; local notes=selected_or_one(app,note); local wanted={}
   if lane.protected or lane.discrete then app.transform_notice='Discrete and channel-mode messages are edited only in their lane.'; return false end
   if app.property_wheel and app.property_wheel.key~=lane.label then app:flush_property_wheel(true) end
@@ -966,7 +934,7 @@ local function adjust_note_property(app,note,wheel)
       local step=lane.pitch and math.max(1,math.floor(8192/math.max(1,app.settings.pitch_bend_range)/100+.5)) or 1; local value=U.clamp(base+delta*step,0,lane.pitch and 16383 or 127)
       if found then if lane.pitch then app.edit:set_pitch(app.take,found.index,n.s,value) elseif lane.status then app.edit:set_message(app.take,found.index,n.s,value) else app.edit:set_cc(app.take,found.index,n.s,value) end
       elseif lane.pitch then app.edit:insert_pitch(app.take,n.s,n.chan,value) elseif lane.status then app.edit:insert_message(app.take,n.s,n.chan,lane.status,value) else app.edit:insert_cc(app.take,n.s,n.chan,lane.cc,value) end
-      wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel}
+      wanted[#wanted+1]={s=n.s,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan}
     end
   end
   app.cache:rebuild(); app.cc_cache:rebuild(); app:reselect_notes(wanted); app.property_wheel={key=lane.label,deadline=reaper.time_precise()+.32,wanted=wanted}; return true
@@ -1121,7 +1089,7 @@ end
 local function pick_velocity_handle(app,v,notes,mx,my,top,height)
   local closest,best_score,best_distance
   for _,n in ipairs(notes) do
-    if (n.chan or 0)==(app.settings.channel or 0) then
+    if (not n.source or not n.source.readonly)and(app.settings.edit_all_channels~=false or (n.chan or 0)==(app.settings.channel or 0)) then
     local x,y=velocity_handle(v,n,top,height); local _,cap_right=velocity_cap(v,n,notes,app.settings.channel or 0)
     local nearest_x=U.clamp(mx,x,cap_right); local dx,dy=nearest_x-mx,y-my; local distance=dx*dx+dy*dy
     -- If handles are geometrically identical, the selected note is the user's
@@ -1150,8 +1118,21 @@ local function begin_gesture(app,take,v,notes,hit,edge,mx,my,mods,double_click)
     return
   end
   mods=Mouse.edit_mods(s,mods)
-  if s.mode=='glue' then
-    app.gesture={kind='glue',seams={},last_x=mx,last_y=my}; collect_glue_seams(v,notes,app.gesture,mx,my,s.row_height,s.channel or 0); return
+  if s.mode=='slide' then
+    local q=v:qn_from_x(mx)
+    local source,notice=require('src.slide_draw').source(app.cache:get(false),reaper.MIDI_GetPPQPosFromProjQN(take,q),s.channel)
+    if not source then app.expression_notice=notice;return end
+    Selection.set_only(app.selection,source.id)
+    if not mods.alt then q=U.snap_time(s,q,reaper.MIDI_GetProjQNFromPPQPos(take,source.s))end
+    local first=math.floor(reaper.MIDI_GetPPQPosFromProjQN(take,q)+.5)
+    if first<source.s or first>=source.e-1 then app.expression_notice='Draw the target within the selected source note time span.';app.expression_editor_open=true;return end
+    local last=math.min(reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn),math.floor(reaper.MIDI_GetPPQPosFromProjQN(take,q+Grid.note_length(s))+.5))
+    app.gesture={kind='slide_draw',source_index=source.index,source_s=source.s,source_e=source.e,first=first,default_last=math.max(first+2,last),mx=mx,my=my}
+    s.note_expression_overlay=true
+    local ok,notice=require('src.slide_draw').preview(app,app.gesture,app.gesture.default_last,v:pitch_from_y(my));app.expression_notice=notice
+    return
+  elseif s.mode=='glue' then
+    app.gesture={kind='glue',seams={},last_x=mx,last_y=my}; collect_glue_seams(v,notes,app.gesture,mx,my,s.row_height,edit_channel(s)); return
   elseif s.mode=='slice' and not (hit and edge) then
     app.gesture={kind='slice',x1=mx,y1=my,x2=mx,y2=my,slices={},last_x=mx,last_y=my,unsnapped=mods.alt}; collect_slice_marks(app,v,notes,app.gesture,mx,my,mods); return
   elseif s.mode=='mute' and not (hit and edge) then
@@ -1173,37 +1154,35 @@ local function begin_gesture(app,take,v,notes,hit,edge,mx,my,mods,double_click)
   elseif s.mode=='chord' then
     local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=mods.alt and raw_q or U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local root=v:pitch_from_y(my)
     if q>=app.item_end_qn then return end
-    if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
-    local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); local pitches=chord_pitches(app,root)
-    local preview={}; Selection.clear(app.selection)
-    if s.chord_drag_length then
+    if s.scale_snap then root=require('src.harmony_regions').snap(app,q,root) end
+    local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); local pitches=chord_pitches(app,root,q)
+    local preview,preview_voices={},{}; Selection.clear(app.selection)
+    do
       local base=app.edit:note_count(take); local items={}; app.edit:begin('ReaRoll: draw '..s.chord_name..' chord',take)
-      for i,pitch in ipairs(pitches) do
-        preview[#preview+1]=pitch
-        if app.edit:insert(take,start,ending,pitch,s.velocity,s.channel,true) then
-          local index=base+i-1; local n={id='chord:'..tostring(index),index=index,s=start,e=ending,pitch=pitch,vel=s.velocity,chan=s.channel,muted=false}
-          app.cache.notes[#app.cache.notes+1]=n; items[#items+1]={note=n,index=index,s=start,e=ending,pitch=pitch,vel=s.velocity}; Selection.add(app.selection,n.id)
-        end
+      local ok,inserted=app.edit:insert_draw_chord(take,start,ending,pitches,s.velocity,s.channel,true)
+      if not ok then app.edit:cancel();app.cache:rebuild();return end
+      for _,entry in ipairs(inserted)do
+        local pitch,index,allocated_channel=entry.pitch,entry.index,entry.chan
+        preview[#preview+1]=pitch;preview_voices[#preview_voices+1]={pitch=pitch,channel=allocated_channel}
+        local n={id='chord:'..tostring(index),index=index,s=start,e=ending,pitch=pitch,vel=s.velocity,chan=allocated_channel,muted=false}
+        app.cache.notes[#app.cache.notes+1]=n;items[#items+1]={note=n,index=index,s=start,e=ending,pitch=pitch,vel=s.velocity};Selection.add(app.selection,n.id)
       end
       app.gesture={kind='chord_draw',mx=mx,start=start,last_e=ending,items=items}
-    else
-      app.edit:begin('ReaRoll: stamp '..s.chord_name..' chord',take)
-      for _,pitch in ipairs(pitches) do preview[#preview+1]=pitch; app.edit:insert(take,start,ending,pitch,s.velocity,s.channel,true) end
-      app.edit:finish(); app.cache:rebuild()
-      for _,n in ipairs(app.cache.notes) do if math.abs(n.s-start)<.5 and n.chan==s.channel then for _,pitch in ipairs(pitches) do if n.pitch==pitch then Selection.add(app.selection,n.id) end end end end
     end
-    app.audition:play_many(preview,s.velocity,s.channel); app.chord_preview=true
+    local separate=s.mpe_enabled
+    for _,voice in ipairs(preview_voices)do if voice.channel~=s.channel then separate=true;break end end
+    if separate then app.audition:play_voices(preview_voices,s.velocity)else app.audition:play_many(preview,s.velocity,s.channel)end; app.chord_preview=true
   elseif s.mode=='paint' then
     local occupied={}
     for _,n in ipairs(app.cache:get(true)) do local nq=U.snap(reaper.MIDI_GetProjQNFromPPQPos(take,n.s),s.grid_qn); occupied[string.format('%.6f:%d:%d',nq,n.pitch,n.chan or 0)]=true end
-    app.edit:begin('ReaRoll: paint notes',take); app.gesture={kind='paint',last_q=nil,last_pitch=nil,visited={},occupied=occupied}; Selection.clear(app.selection)
+    app.edit:begin('ReaRoll: paint notes',take); app.gesture={kind='paint',anchor_pitch=v:pitch_from_y(my),last_q=nil,last_pitch=nil,visited={},occupied=occupied}; Selection.clear(app.selection)
   else
-    local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=mods.alt and raw_q or U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local p=v:pitch_from_y(my); if s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
+    local length=Grid.note_length(s); local raw_q=v:qn_from_x(mx); local q=mods.alt and raw_q or U.snap_time(s,raw_q); q=math.max(app.item_start_qn,q); local p=v:pitch_from_y(my); if s.scale_snap then p=require('src.harmony_regions').snap(app,q,p) end
     if q>=app.item_end_qn then return end
-    local index=app.edit:note_count(take); app.edit:begin('ReaRoll: draw note',take); local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); app.edit:insert(take,start,ending,p,s.velocity,s.channel,true)
-    local n={id='new:'..tostring(index),index=index,s=start,e=ending,pitch=p,vel=s.velocity,chan=s.channel,muted=false}
+    local index=app.edit:note_count(take); app.edit:begin('ReaRoll: draw note',take); local start=reaper.MIDI_GetPPQPosFromProjQN(take,q); local ending=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,q+length)); local inserted,allocated_index,allocated_channel=app.edit:insert_draw(take,start,ending,p,s.velocity,s.channel,true); if not inserted then app.edit:cancel();return end;index=allocated_index
+    local n={id='new:'..tostring(index),index=index,s=start,e=ending,pitch=p,vel=s.velocity,chan=allocated_channel,muted=false}
     app.cache.notes[#app.cache.notes+1]=n; Selection.set_only(app.selection,n.id)
-    app.gesture={kind='draw',mx=mx,note=n,index=index,start=start,last_e=ending,pitch=p,items={{note=n,index=index,s=start,e=ending,pitch=p,vel=s.velocity}}}; app.audition:play(p,s.velocity,s.channel)
+    app.gesture={kind='draw',mx=mx,note=n,index=index,start=start,last_e=ending,pitch=p,items={{note=n,index=index,s=start,e=ending,pitch=p,vel=s.velocity}}}; app.audition:play(p,s.velocity,allocated_channel)
   end
 end
 
@@ -1255,6 +1234,9 @@ local function update_gesture(app,take,v,mx,my,mods)
   if g.kind=='copy_pending' then
     if math.abs(mx-g.mx)<4 and math.abs(my-g.my)<4 then return end
     local chosen=Selection.has(app.selection,g.hit.id) and Selection.list(app.selection,app.cache:get(true)) or {g.hit}
+    if s.mpe_enabled or require('src.slide_links').selection_has(take,chosen)then
+      app.gesture={kind='expression_copy',mx=g.mx,my=g.my,anchor_qn=g.anchor_qn,anchor_pitch=g.anchor_pitch,items=snapshot(chosen)};g=app.gesture
+    else
     app.edit:begin('ReaRoll: duplicate notes',take); local base=app.edit:note_count(take); local copies={}; Selection.clear(app.selection)
     for i,n in ipairs(chosen) do
       app.edit:insert(take,n.s,n.e,n.pitch,n.vel,n.chan,true,n.muted)
@@ -1262,35 +1244,63 @@ local function update_gesture(app,take,v,mx,my,mods)
       app.cache.notes[#app.cache.notes+1]=copy; copies[#copies+1]=copy; Selection.add(app.selection,copy.id)
     end
     app.gesture={kind='move',mx=g.mx,my=g.my,anchor_qn=g.anchor_qn,anchor_pitch=g.anchor_pitch,items=snapshot(copies),last_dx=nil,last_dp=nil,audition_pitch=g.hit.pitch,audition_velocity=g.hit.vel,audition_channel=g.hit.chan,last_audition_pitch=g.hit.pitch}; g=app.gesture
+    end
   end
-  if g.kind=='move' then
+  if g.kind=='slide_edit' then require('src.ui.slide_targets').update(app,g,v,mx,my,mods)
+  elseif g.kind=='slide_draw' then
+    local target=v:pitch_from_y(my);local last=g.default_last
+    if math.abs(mx-g.mx)>=4 then
+      local q=v:qn_from_x(mx);if not mods.alt then q=U.snap_time(s,q,reaper.MIDI_GetProjQNFromPPQPos(take,g.first))end
+      last=math.max(g.first+2,math.min(reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn),math.floor(reaper.MIDI_GetPPQPosFromProjQN(take,q)+.5)))
+    end
+    if last~=g.last or target~=g.target then local ok,notice=require('src.slide_draw').preview(app,g,last,target);app.expression_notice=notice end
+  elseif g.kind=='move' or g.kind=='expression_copy' then
     local raw=v:qn_from_x(mx)-g.anchor_qn; local mode=(mods.alt and 'off' or U.snap_mode(s)); local dx_qn=raw
     if mode=='relative' then dx_qn=U.snap(raw,s.grid_qn) elseif mode=='absolute' then local first_qn=reaper.MIDI_GetProjQNFromPPQPos(take,g.items[1].s); dx_qn=U.snap(first_qn+raw,s.grid_qn)-first_qn end
     local dx=dx_qn*v.ppq_per_qn; local dp=v:pitch_from_y(my)-g.anchor_pitch
-    if s.scale_snap and #g.items==1 then local target=app.music.snap(s.scale_root,s.scale_name,g.items[1].pitch+dp,dp); dp=target-g.items[1].pitch end
+    local scale_steps=(s.scale_view_only or v.mapped) and v.fold_index and v.fold_index[v:pitch_from_y(my)] and v.fold_index[g.anchor_pitch]
+    if scale_steps then dp=v.fold_index[v:pitch_from_y(my)]-v.fold_index[g.anchor_pitch]
+    elseif s.scale_snap and #g.items==1 then local target=require('src.harmony_regions').snap(app,reaper.MIDI_GetProjQNFromPPQPos(take,g.items[1].s+dx),g.items[1].pitch+dp,dp); dp=target-g.items[1].pitch end
+    local function moved_pitch(p)
+      local target=scale_steps and v:shift_scale_pitch(p,dp) or U.clamp(p+dp,0,127)
+      if scale_steps and s.scale_snap and #g.items==1 then target=require('src.harmony_regions').snap(app,reaper.MIDI_GetProjQNFromPPQPos(take,g.items[1].s+dx),target,dp)end
+      return target
+    end
     local item_s=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_start_qn); local min_s,max_e=math.huge,-math.huge
     for _,a in ipairs(g.items) do min_s=math.min(min_s,a.s); max_e=math.max(max_e,a.e) end
     local item_e=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn)
     dx=U.clamp(dx,item_s-min_s,item_e-max_e)
     if dx~=g.last_dx or dp~=g.last_dp then
-      for _,a in ipairs(g.items) do app.edit:set(a.index,take,a.s+dx,a.e+dx,U.clamp(a.pitch+dp,0,127),nil); a.note.s,a.note.e,a.note.pitch=a.s+dx,a.e+dx,U.clamp(a.pitch+dp,0,127) end
-      local audition_pitch=g.audition_pitch and U.clamp(g.audition_pitch+dp,0,127)
+      if g.kind=='expression_copy' then
+        local ok,notice=require('src.note_clone').preview(app,g,dx,moved_pitch);app.expression_notice=notice
+        if not app.gesture then return end
+      else
+        local changes={};for _,a in ipairs(g.items)do changes[#changes+1]={index=a.index,values={s=a.s+dx,e=a.e+dx,pitch=moved_pitch(a.pitch)}}end
+        if not app.edit:set_group(take,changes,true)then return end
+        for _,a in ipairs(g.items)do a.note.s,a.note.e,a.note.pitch=a.s+dx,a.e+dx,moved_pitch(a.pitch)end
+      end
+      local audition_pitch=g.audition_pitch and moved_pitch(g.audition_pitch)
       if audition_pitch and audition_pitch~=g.last_audition_pitch then app.audition:play(audition_pitch,g.audition_velocity,g.audition_channel); g.last_audition_pitch=audition_pitch end
       g.last_dx,g.last_dp=dx,dp
     end
   elseif g.kind=='resize' then
     local raw=v:qn_from_x(mx)-g.anchor_qn; local mode=(mods.alt and 'off' or U.snap_mode(s)); local dx=raw*v.ppq_per_qn
     local item_s=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_start_qn)
-    if dx~=g.last_dx then for _,a in ipairs(g.items) do
+    if dx~=g.last_dx then local changes={};for _,a in ipairs(g.items) do
       local minimum=(mode~='off' and s.grid_qn*v.ppq_per_qn or 1)
-      if g.edge=='left' then local original=reaper.MIDI_GetProjQNFromPPQPos(take,a.s); local target=mode=='off' and original+raw or mode=='relative' and original+U.snap(raw,s.grid_qn) or U.snap(original+raw,s.grid_qn); local start=math.max(item_s,math.min(a.e-minimum,reaper.MIDI_GetPPQPosFromProjQN(take,target))); app.edit:set(a.index,take,start,nil,nil,nil); a.note.s=start
-      else local original=reaper.MIDI_GetProjQNFromPPQPos(take,a.e); local target=mode=='off' and original+raw or mode=='relative' and original+U.snap(raw,s.grid_qn) or U.snap(original+raw,s.grid_qn); local ending=math.min(reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn),math.max(a.s+minimum,reaper.MIDI_GetPPQPosFromProjQN(take,target))); app.edit:set(a.index,take,nil,ending,nil,nil); a.note.e=ending end
-    end; g.last_dx=dx end
+      if g.edge=='left' then local original=reaper.MIDI_GetProjQNFromPPQPos(take,a.s); local target=mode=='off' and original+raw or mode=='relative' and original+U.snap(raw,s.grid_qn) or U.snap(original+raw,s.grid_qn); local start=math.max(item_s,math.min(a.e-minimum,reaper.MIDI_GetPPQPosFromProjQN(take,target))); changes[#changes+1]={index=a.index,values={s=start}}
+      else local original=reaper.MIDI_GetProjQNFromPPQPos(take,a.e); local target=mode=='off' and original+raw or mode=='relative' and original+U.snap(raw,s.grid_qn) or U.snap(original+raw,s.grid_qn); local ending=math.min(reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn),math.max(a.s+minimum,reaper.MIDI_GetPPQPosFromProjQN(take,target))); changes[#changes+1]={index=a.index,values={e=ending}} end
+    end
+      if not app.edit:set_group(take,changes,true)then return end
+      for _,change in ipairs(changes)do for _,a in ipairs(g.items)do if a.index==change.index then a.note.s=change.values.s or a.s;a.note.e=change.values.e or a.e end end end
+      g.last_dx=dx end
   elseif g.kind=='stretch' then
     local target_qn=v:qn_from_x(mx); if not mods.alt then target_qn=U.snap_time(s,target_qn,reaper.MIDI_GetProjQNFromPPQPos(take,g.max_e)) end
     local target=U.clamp(reaper.MIDI_GetPPQPosFromProjQN(take,target_qn),g.min_s+1,reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn)); local span=math.max(1,g.max_e-g.min_s); local factor=(target-g.min_s)/span
     if factor~=g.last_factor then
-      for _,a in ipairs(g.items) do local ns=g.min_s+(a.s-g.min_s)*factor; local ne=g.min_s+(a.e-g.min_s)*factor; app.edit:set(a.index,take,ns,ne,nil,nil); a.note.s,a.note.e=ns,ne end
+      local changes={};for _,a in ipairs(g.items)do changes[#changes+1]={index=a.index,values={s=g.min_s+(a.s-g.min_s)*factor,e=g.min_s+(a.e-g.min_s)*factor}}end
+      if not app.edit:set_group(take,changes,true)then return end
+      for _,a in ipairs(g.items)do a.note.s,a.note.e=g.min_s+(a.s-g.min_s)*factor,g.min_s+(a.e-g.min_s)*factor end
       g.last_factor=factor
     end
   elseif g.kind=='draw' or g.kind=='chord_draw' then
@@ -1298,37 +1308,41 @@ local function update_gesture(app,take,v,mx,my,mods)
     g.dragged=true
     local raw_q=v:qn_from_x(mx); local start_qn=reaper.MIDI_GetProjQNFromPPQPos(take,g.start); local q=mods.alt and raw_q or U.snap_time(s,raw_q,start_qn); local minimum=(U.snap_mode(s)~='off' and s.grid_qn or 1/v.ppq_per_qn); q=U.clamp(q,minimum+start_qn,app.item_end_qn); local e=reaper.MIDI_GetPPQPosFromProjQN(take,q)
     if e~=g.last_e then
-      if g.kind=='chord_draw' then for _,a in ipairs(g.items) do app.edit:set(a.index,take,nil,e,nil,nil); a.note.e=e end
-      else app.edit:set(g.index,take,nil,e,nil,nil); g.note.e=e end
-      g.last_e=e
+      local indices={};if g.items then for _,a in ipairs(g.items)do indices[#indices+1]=a.index end else indices[1]=g.index end
+      if app.edit:resize_draw(take,indices,e)then
+        local function sync(note,index)local current=app.edit.active.notes[index+1];note.e=current.e;note.chan=current.chan end
+        if g.items then for _,a in ipairs(g.items)do sync(a.note,a.index)end else sync(g.note,g.index)end
+        g.last_e=e
+      end
     end
   elseif g.kind=='paint' then
     local length=Grid.note_length(s)
-    local q=U.snap(v:qn_from_x(mx),s.grid_qn); local p=v:pitch_from_y(my); if s.scale_snap then p=app.music.snap(s.scale_root,s.scale_name,p) end
+    local q=U.snap(v:qn_from_x(mx),s.grid_qn); local p=mods.shift and v:pitch_from_y(my) or g.anchor_pitch; if s.scale_snap and (mods.shift or not g.locked_pitch)then p=require('src.harmony_regions').snap(app,q,p) end
+    g.locked_pitch=g.locked_pitch or p;if not mods.shift then p=g.locked_pitch;g.last_pitch=p end
     local q_steps=g.last_q and math.abs(math.floor((q-g.last_q)/s.grid_qn+.5)) or 0; local p_steps=g.last_pitch and math.abs(p-g.last_pitch) or 0; local steps=math.max(1,q_steps,p_steps)
     local painted=false
     for i=1,steps do
       local ratio=i/steps; local cell_q=g.last_q and U.snap(g.last_q+(q-g.last_q)*ratio,s.grid_qn) or q; local cell_p=g.last_pitch and math.floor(g.last_pitch+(p-g.last_pitch)*ratio+.5) or p
-      if s.scale_snap then cell_p=app.music.snap(s.scale_root,s.scale_name,cell_p,p-(g.last_pitch or p)) end
+      if s.scale_snap and mods.shift then cell_p=require('src.harmony_regions').snap(app,cell_q,cell_p,p-(g.last_pitch or p)) end
       local cell=string.format('%.6f:%d:%d',cell_q,cell_p,s.channel or 0)
-      if not g.visited[cell] and cell_q>=app.item_start_qn and cell_q<app.item_end_qn then
+      if not g.visited[cell] and cell_q>=app.item_start_qn and cell_q<app.item_end_qn and require('src.groove').paint_hit(cell_q,app.item_start_qn,s.grid_qn,s.paint_every) then
         local sp=reaper.MIDI_GetPPQPosFromProjQN(take,cell_q); local ep=reaper.MIDI_GetPPQPosFromProjQN(take,math.min(app.item_end_qn,cell_q+length))
         if not s.prevent_overlaps or not g.occupied[cell] then
           local index=app.edit:note_count(take)
-          if app.edit:insert(take,sp,ep,cell_p,s.velocity,s.channel,true) then app.cache.notes[#app.cache.notes+1]={id='paint:'..tostring(index),index=index,s=sp,e=ep,pitch=cell_p,vel=s.velocity,chan=s.channel,muted=false}; painted=true end
+          local inserted,allocated_index,allocated_channel=app.edit:insert_draw(take,sp,ep,cell_p,s.velocity,s.channel,true); if inserted then app.cache.notes[#app.cache.notes+1]={id='paint:'..tostring(allocated_index),index=allocated_index,s=sp,e=ep,pitch=cell_p,vel=s.velocity,chan=allocated_channel,muted=false}; g.audition_channel=allocated_channel;painted=true end
           g.occupied[cell]=true
         end
         g.visited[cell]=true
       end
     end
-    g.last_q,g.last_pitch=q,p; if painted then app.audition:play(p,s.velocity,s.channel) end
+    g.last_q,g.last_pitch=q,p; if painted then app.audition:play(p,s.velocity,g.audition_channel or s.channel) end
   elseif g.kind=='marquee' then g.x2,g.y2=mx,my; update_marquee_world(g,v,mx,my)
   elseif g.kind=='cc_marquee' then
     local q=v:qn_from_x(mx); if s.snap_enabled then q=U.snap(q,s.grid_qn) end
     q=U.clamp(q,app.item_start_qn,app.item_end_qn); g.x2,g.y2=v:x_from_qn(q),my
     if math.abs(mx-(g.press_x or g.x1))>=3 then g.dragged=true end
   elseif g.kind=='slice' then g.x2,g.y2=mx,my; g.unsnapped=mods.alt; collect_slice_marks(app,v,app.cache:get(true),g,mx,my,mods)
-  elseif g.kind=='glue' then collect_glue_seams(v,app.cache:get(true),g,mx,my,s.row_height,s.channel or 0)
+  elseif g.kind=='glue' then collect_glue_seams(v,app.cache:get(true),g,mx,my,s.row_height,edit_channel(s))
   elseif g.kind=='velocity' then
     local target=U.clamp(math.floor((g.bottom-my)/g.height*127+.5),1,127); local delta=target-g.anchor
     if delta~=g.last_delta then
@@ -1388,6 +1402,9 @@ end
 local function finish_gesture(app,notes)
   local g=app.gesture; if not g then return end
   if g.kind=='copy_pending' then if g.click_add then Selection.add(app.selection,g.hit.id) else Selection.toggle(app.selection,g.hit.id) end; app.gesture=nil; return
+  elseif g.kind=='slide_edit' then require('src.ui.slide_targets').finish(app,g);app.audition:stop();app.gesture=nil;return
+  elseif g.kind=='slide_draw' then require('src.slide_draw').finish(app,g);app.audition:stop();app.gesture=nil;return
+  elseif g.kind=='expression_copy' then require('src.note_clone').finish(app,g);app.audition:stop();app.gesture=nil;return
   elseif g.kind=='cc_move' then app.edit:finish(); app.cc_cache:rebuild(); app.gesture=nil; return
   elseif g.kind=='cc_marquee' then
     if not g.dragged then
@@ -1409,81 +1426,125 @@ local function finish_gesture(app,notes)
   elseif g.kind=='slice' then
     local cut_sets={}; for _,mark in pairs(g.slices or {}) do cut_sets[mark.note]=cut_sets[mark.note] or {}; cut_sets[mark.note][string.format('%.3f',mark.ppq)]=mark.ppq end
     local plans,indices={},{ }; for n,set in pairs(cut_sets) do local cuts={}; for _,ppq in pairs(set) do cuts[#cuts+1]=ppq end; table.sort(cuts); plans[#plans+1]={note=n,cuts=cuts}; indices[#indices+1]=n.index end
-    if #plans>0 then app.edit:begin('ReaRoll: paint slice notes',app.take); app.edit:delete_indices(app.take,indices); local wanted={}
-      for _,plan in ipairs(plans) do local n,start=plan.note,plan.note.s; for _,ending in ipairs(plan.cuts) do app.edit:insert(app.take,start,ending,n.pitch,n.vel,n.chan,true,n.muted); wanted[#wanted+1]={s=start,e=ending,pitch=n.pitch,vel=n.vel}; start=ending end; app.edit:insert(app.take,start,n.e,n.pitch,n.vel,n.chan,true,n.muted); wanted[#wanted+1]={s=start,e=n.e,pitch=n.pitch,vel=n.vel} end
+    if #plans>0 then app.edit:begin('ReaRoll: paint slice notes',app.take);if not app.edit.replace_notes and app.edit.structural_guard and not app.edit:structural_guard(indices)then app.edit:cancel();app.gesture=nil;app.audition:stop();return end; local preserved={};if not app.edit.replace_notes then app.edit:delete_indices(app.take,indices,true)end; local wanted={}
+      for _,plan in ipairs(plans) do local n,start=plan.note,plan.note.s; for _,ending in ipairs(plan.cuts) do if app.edit.replace_notes then preserved[#preserved+1]={s=start,e=ending,pitch=n.pitch,source_index=n.index}else app.edit:insert(app.take,start,ending,n.pitch,n.vel,n.chan,true,n.muted)end; wanted[#wanted+1]={s=start,e=ending,pitch=n.pitch,vel=n.vel,chan=n.chan}; start=ending end; if app.edit.replace_notes then preserved[#preserved+1]={s=start,e=n.e,pitch=n.pitch,source_index=n.index}else app.edit:insert(app.take,start,n.e,n.pitch,n.vel,n.chan,true,n.muted)end; wanted[#wanted+1]={s=start,e=n.e,pitch=n.pitch,vel=n.vel,chan=n.chan} end
+      if app.edit.replace_notes and not app.edit:replace_notes(app.take,indices,preserved)then app.edit:cancel();app.gesture=nil;app.audition:stop();return end
+      if app.edit.active and app.edit.active.collecting then app.edit:end_group()end
       app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
     end
   else
     local wanted={}
-    if g.items then for _,a in ipairs(g.items) do wanted[#wanted+1]={s=a.note.s,e=a.note.e,pitch=a.note.pitch,vel=a.note.vel} end end
+    if g.items then for _,a in ipairs(g.items) do wanted[#wanted+1]={s=a.note.s,e=a.note.e,pitch=a.note.pitch,vel=a.note.vel,chan=a.note.chan} end end
     app.edit:finish(); app.cache:rebuild(); reselect(app,wanted)
   end
   app.audition:stop(); app.gesture=nil
 end
 
 function C.draw(app)
+  if app.multi_edit_mode then
+    local state=require('src.multi_notes').refresh(app)
+    local x,y=app.ImGui.GetCursorScreenPos(app.ctx);local w,h=app.ImGui.GetContentRegionAvail(app.ctx)
+    state=require('src.ui.multi_header').draw(app,state,x,y,w)
+    local header=require('src.ui.multi_header').height(app)
+    app.ImGui.SetCursorScreenPos(app.ctx,x,y+header)
+    if not app.gesture and not state.transaction then Sources.focus(app,app.multi_creation_take or app.take)end
+  end
   local I,c,T,s,take=app.ImGui,app.ctx,app.theme,app.settings,app.take
+  local gesture_cancelled=require('src.gesture_cancel').poll(app)
   -- Alt-wheel property edits are deliberately coalesced for a short time.
   -- A new pointer gesture is a new user action and must get its own undo block.
   if app.property_wheel and (I.IsMouseClicked(c,I.MouseButton_Left) or I.IsMouseClicked(c,I.MouseButton_Right) or I.IsMouseClicked(c,I.MouseButton_Middle)) then app:flush_property_wheel(true) end
-  local aw,ah=I.GetContentRegionAvail(c); local key_w,ruler_h,hbar_h,vbar_w=88,22,16,16
-  local lane_tools_h=LaneTools.height(app); local lane_min=40+lane_tools_h
-  local lane_total_h=s.lane_open and U.clamp(s.lane_height,lane_min,math.max(lane_min,ah*.46)) or lane_tools_h
-  local raw_grid_h=math.max(90,ah-ruler_h-lane_total_h-hbar_h-1)
-  local grid_h=s.lane_open and math.max(s.row_height,math.floor(raw_grid_h/s.row_height)*s.row_height) or raw_grid_h
+  local aw,ah=I.GetContentRegionAvail(c); local key_w,ruler_h,hbar_h,vbar_w=require('src.ui.drum_rows').width(app),22,16,16
+  local harmony_lane=app.harmony_regions and app.harmony_regions.enabled and #app.harmony_regions.regions>0
+  if harmony_lane then ruler_h=40 end
+  local chord_lane=app.chord_track and app.chord_track.enabled and #app.chord_track.chords>0
+  local chord_y=ruler_h
+  if chord_lane then ruler_h=ruler_h+18 end
+  local lane_tools_h=app.expression_toolbar_external and 0 or LaneTools.height(app); local lane_min=40+lane_tools_h
+  local show_controller_lanes=s.lane_open and not(app.expression_editor_open and s.mpe_enabled)
+  local lane_total_h=show_controller_lanes and U.clamp(s.lane_height,lane_min,math.max(lane_min,ah*(s.lane_stack_enabled and .65 or .46))) or lane_tools_h
+  local articulation_h=0
+  local raw_grid_h=math.max(90,ah-ruler_h-lane_total_h-hbar_h-1-articulation_h)
+  local grid_h=show_controller_lanes and math.max(s.row_height,math.floor(raw_grid_h/s.row_height)*s.row_height) or raw_grid_h
   -- With the lane open, give the fractional pitch-row remainder to the lane.
   -- With it closed, let the grid absorb that remainder so the scrollbar and
   -- phrase toolbar remain flush against each other and the window bottom.
-  if s.lane_open then lane_total_h=lane_total_h+(raw_grid_h-grid_h) end
+  if show_controller_lanes then lane_total_h=lane_total_h+(raw_grid_h-grid_h) end
   local x0,y0=I.GetCursorScreenPos(c); local gx,gy=x0+key_w,y0+ruler_h; local v=app.viewport
   local source_start,source_end=source_timeline_bounds(app)
   v:set_geometry(gx,gy,math.max(100,aw-key_w-vbar_w-2),grid_h,take,source_start,source_end)
   local transport_state=reaper.GetPlayState()
   app.follow_playback_time=(transport_state&1)~=0 and reaper.GetPlayPosition() or nil
-  v:update_scroll(reaper.time_precise(),app.gesture~=nil)
-  v:update_wheel_zoom(reaper.time_precise(),app.gesture~=nil)
-  v:update_follow(transport_state,app.follow_playback_time and reaper.TimeMap2_timeToQN(0,app.follow_playback_time) or nil)
+  local editing=app.gesture~=nil or app.multi_edit_mode and (app.multi_notes.transaction or app.multi_notes.marquee)~=nil
+  v:update_scroll(reaper.time_precise(),editing)
+  v:update_wheel_zoom(reaper.time_precise(),editing)
+  if not editing and not app.edit.active then v:update_follow(transport_state,app.follow_playback_time and reaper.TimeMap2_timeToQN(0,app.follow_playback_time) or nil)end
   v:set_geometry(gx,gy,v.w,grid_h,take,source_start,source_end)
   local item_ppq0=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_start_qn)
   local item_ppq1=reaper.MIDI_GetPPQPosFromProjQN(take,app.item_end_qn)
+  local source_notes=app.multi_edit_mode and Sources.notes(app)or nil
   local fold_notes={}
   for _,n in ipairs(app.cache:get(app.gesture~=nil)) do if n.e>=item_ppq0 and n.s<=item_ppq1 then fold_notes[#fold_notes+1]=n end end
+  if source_notes then fold_notes=source_notes end
   if s.fold_enabled and app.key_colors and next(app.key_colors) then
     fold_notes={table.unpack(fold_notes)}; for pitch in pairs(app.key_colors) do fold_notes[#fold_notes+1]={pitch=pitch} end
   end
-  v:set_fold(fold_notes)
+  fold_notes=app.multi_edit_mode and require('src.ui.multi_slides').fold_notes(app,fold_notes)or require('src.ui.slide_targets').fold_notes(app,fold_notes)
+  v:set_fold(fold_notes,require('src.instrument_map').layout(app.instrument_map,s.channel or 0),app.harmony_regions and app.harmony_regions.enabled and app.harmony_regions.regions or nil)
+  app.scale_hidden_count=0
+  if s.scale_view_only then for _,n in ipairs(fold_notes)do if not v.fold_index[n.pitch]then app.scale_hidden_count=app.scale_hidden_count+1 end end end
   local notes={}
   for _,n in ipairs(app.cache:visible(v.ppq0,v.ppq1,v.fold and 0 or s.low_pitch,v.fold and 127 or v:high_pitch(),app.gesture~=nil)) do
     if n.e>=item_ppq0 and n.s<=item_ppq1 then notes[#notes+1]=n end
   end
+  if source_notes then
+    notes={};for _,n in ipairs(source_notes)do if n.e>=v.ppq0 and n.s<=v.ppq1 and v:is_pitch_visible(n.pitch)then notes[#notes+1]=n end end
+  end
   local mx,my=I.GetMousePos(c)
   local phrase_popup_open=LaneTools.any_popup_open(app)
-  local interaction_channel=(s.mode=='select' or s.mode=='slice') and nil or (s.channel or 0)
-  local inside_item=mx>=v:x_from_qn(app.item_start_qn) and mx<=v:x_from_qn(app.item_end_qn)
+  local interaction_channel;if s.edit_all_channels==false and not(s.mpe_pitch_edit and s.mpe_enabled)and s.mode~='select' and s.mode~='slice' then interaction_channel=s.channel or 0 end
+  local inside_item=app.multi_edit_mode or mx>=v:x_from_qn(app.item_start_qn) and mx<=v:x_from_qn(app.item_end_qn)
   local hover,edge=hit_note_inside(inside_item,v,notes,mx,my,s.row_height,interaction_channel)
   local glue_hover=nil
-  if s.mode=='glue' then local best=math.huge; for _,boundary in ipairs(glue_boundaries(notes,s.channel or 0)) do local bx,by=v:x_from_ppq(boundary.ppq),v:y_from_pitch(boundary.pitch); local distance=by and math.sqrt((mx-bx)^2+(my-(by+s.row_height*.5))^2) or math.huge; if distance<=10 and distance<best then glue_hover,best=boundary,distance end end end
+  if s.mode=='glue' then local best=math.huge; for _,boundary in ipairs(glue_boundaries(notes,edit_channel(s))) do local bx,by=v:x_from_ppq(boundary.ppq),v:y_from_pitch(boundary.pitch); local distance=by and math.sqrt((mx-bx)^2+(my-(by+s.row_height*.5))^2) or math.huge; if distance<=10 and distance<best then glue_hover,best=boundary,distance end end end
   local hover_pitch=nil; if my>=gy and my<=gy+grid_h and mx>=x0 and mx<=gx+v.w then hover_pitch=v:pitch_from_y(my) end
   local d=I.GetWindowDrawList(c)
   local playhead=playhead_visual(app,v)
   draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
   I.DrawList_PushClipRect(d,gx,gy,gx+v.w,gy+grid_h,true); draw_playhead_pass(app,d,playhead,gy,gy+grid_h,false); I.DrawList_PopClipRect(d)
   local status=string.format('%s  ·  V%d  ·  %s',s.mode:sub(1,1):upper()..s.mode:sub(2),s.velocity,s.adaptive_grid and 'Auto' or string.format('G %.3g',s.grid_qn))
+  local overlap=require('src.overlap_mode').state(app);if overlap then
+    local drawing_setup=require('src.overlap_mode').drawing_settings(app)
+    status=status..'  /  '..(drawing_setup.mpe_enabled and 'MPE Glide'or 'Glide')..' +/- '..require('src.glide_setup').range(drawing_setup)..' st'
+  end
+  if app.multi_edit_mode and app.multi_notes.notice then status=app.multi_notes.notice
+  elseif app.expression_notice then status=app.expression_notice elseif s.mode=='slide' then status='Slide: draw overlapping target / Ch '..tostring((s.channel or 0)+1)end
+  if s.scale_view_only then status=status..'  ·  Scale only'..(app.scale_hidden_count>0 and (' ('..app.scale_hidden_count..' notes hidden)') or '')end
+  if app.input_notes and next(app.input_notes)then
+    local pitches={};for p in pairs(app.input_notes)do pitches[#pitches+1]=p end;table.sort(pitches)
+    local labels={};for i=1,math.min(6,#pitches)do labels[#labels+1]=U.pitch_name(pitches[i])end
+    status=status..'  ·  MIDI '..table.concat(labels,' ')
+  end
   if hover then
     local stacked=overlapping_channels(notes,hover); local stack_text=''
     if #stacked>0 then local labels={'Ch '..tostring((hover.chan or 0)+1)}; for _,channel in ipairs(stacked) do labels[#labels+1]='Ch '..tostring(channel+1) end; stack_text='  |  Stack '..table.concat(labels,' + ') end
-    status=U.pitch_name(hover.pitch)..'  ·  V'..hover.vel..stack_text..'  ·  '..status
+    status=(hover.source and hover.source.name..' / 'or '')..U.pitch_name(hover.pitch)..'  ·  V'..hover.vel..stack_text..'  ·  '..status
   end
   I.DrawList_PushClipRect(d,gx,gy,gx+v.w,gy+grid_h,true)
   local note_play_ppq=nil
   if s.note_playback_animation~=false and reaper.GetPlayState and (reaper.GetPlayState()&1)~=0 then note_play_ppq=reaper.MIDI_GetPPQPosFromProjTime(take,reaper.GetPlayPosition()) end
-  local ghost_hover=draw_ghost_notes(app,d,v,mx,my); if not phrase_popup_open then draw_placement_preview(app,d,v,mx,my,hover or ghost_hover) end
-  local active_left=U.clamp(v:x_from_qn(app.item_start_qn),gx,gx+v.w); local active_right=U.clamp(v:x_from_qn(app.item_end_qn),gx,gx+v.w)
+  local ghost_hover=draw_ghost_notes(app,d,v,mx,my); if not phrase_popup_open and not s.mpe_pitch_edit then draw_placement_preview(app,d,v,mx,my,hover or ghost_hover) end
+  local active_left=app.multi_edit_mode and gx or U.clamp(v:x_from_qn(app.item_start_qn),gx,gx+v.w); local active_right=app.multi_edit_mode and gx+v.w or U.clamp(v:x_from_qn(app.item_end_qn),gx,gx+v.w)
   local stretch_hot=false
   if active_right>active_left then
     I.DrawList_PushClipRect(d,active_left,gy,active_right,gy+grid_h,true)
     draw_notes(app,d,v,notes,hover,note_play_ppq)
-    local frame_notes,frame_all=app.cache:get(true),false
+    if app.multi_edit_mode then require('src.ui.multi_slides').draw(app,d,v)
+    elseif not require('src.ui.expression_direct').grid_visible(app)then require('src.ui.note_expression').draw(app,d,v,notes)end
+    require('src.ui.expression_direct').grid_draw(app,d,v)
+    if not app.multi_edit_mode and not s.mpe_pitch_edit then require('src.ui.slide_targets').draw(app,d,v) end
+    if not app.multi_edit_mode then require('src.ui.overlap_glide').draw(app,d,v,app.cache:get(false))end
+    local frame_notes,frame_all=source_notes or app.cache:get(true),false
     if app.gesture and (app.gesture.kind=='move' or app.gesture.kind=='resize' or app.gesture.kind=='stretch') and app.gesture.items then
       frame_notes={}; for _,entry in ipairs(app.gesture.items) do frame_notes[#frame_notes+1]=entry.note end; frame_all=true
     end
@@ -1509,6 +1570,8 @@ function C.draw(app)
     I.DrawList_PopClipRect(d)
   end
   local start_handle_x,end_handle_x=v:x_from_qn(app.item_start_qn),v:x_from_qn(app.item_end_qn)
+  if harmony_lane then require('src.harmony_regions').draw(app,d,v,y0+22,18)end
+  if chord_lane then require('src.chord_track').draw(app,d,v,y0+chord_y,18)end
   local handle_y1,handle_y2=y0+2,y0+ruler_h-2
   local start_hot=my>=y0 and my<=y0+ruler_h and math.abs(mx-start_handle_x)<=7
   local end_hot=my>=y0 and my<=y0+ruler_h and math.abs(mx-end_handle_x)<=7
@@ -1522,7 +1585,10 @@ function C.draw(app)
     I.DrawList_AddTriangleFilled(d,end_handle_x-8,handle_y1,end_handle_x-2,handle_y1,end_handle_x-2,handle_y1+5,handle_color)
   end
   I.DrawList_PushClipRect(d,gx,gy,gx+v.w,gy+grid_h,true)
-  if app.gesture and app.gesture.kind=='marquee' then local g=app.gesture
+  if app.gesture and app.gesture.kind=='slide_draw' and app.gesture.valid then
+    local g=app.gesture;local x1,x2=v:x_from_ppq(g.first),v:x_from_ppq(g.last);local y=v:y_from_pitch(g.target)
+    if y then I.DrawList_AddRectFilled(d,x1,y,x2,y+s.row_height,T.marquee_fill);I.DrawList_AddRect(d,x1,y,x2,y+s.row_height,T.selected_edge,3)end
+  elseif app.gesture and app.gesture.kind=='marquee' then local g=app.gesture
     local ax=g.qn1 and v:x_from_qn(g.qn1) or g.x1; local bx=g.qn2 and v:x_from_qn(g.qn2) or g.x2
     -- Preserve endpoints in pitch/world space while edge scrolling. Using the
     -- original screen Y after an endpoint left the view made the box move with
@@ -1531,13 +1597,14 @@ function C.draw(app)
     local x1,y1,x2,y2=math.min(ax,bx),math.min(ay,by),math.max(ax,bx),math.max(ay,by)
     I.DrawList_AddRectFilled(d,x1,y1,x2,y2,T.marquee_fill); I.DrawList_AddRect(d,x1,y1,x2,y2,T.marquee_edge)
   elseif app.gesture and app.gesture.kind=='slice' then for _,mark in pairs(app.gesture.slices or {}) do local x,y=v:x_from_ppq(mark.ppq),v:y_from_pitch(mark.note.pitch); if y then I.DrawList_AddLine(d,x,y+1,x,y+s.row_height-2,T.slice_line,3) end end
-  elseif app.gesture and app.gesture.kind=='glue' then for _,boundary in ipairs(glue_boundaries(notes,s.channel or 0)) do if app.gesture.seams[glue_key(boundary.ppq,boundary.pitch,boundary.chan)] then local bx,by=v:x_from_ppq(boundary.ppq),v:y_from_pitch(boundary.pitch); if by then I.DrawList_AddLine(d,bx,by+1,bx,by+s.row_height-2,T.selected_edge or T.accent,3) end end end end
+  elseif app.gesture and app.gesture.kind=='glue' then for _,boundary in ipairs(glue_boundaries(notes,edit_channel(s))) do if app.gesture.seams[glue_key(boundary.ppq,boundary.pitch,boundary.chan)] then local bx,by=v:x_from_ppq(boundary.ppq),v:y_from_pitch(boundary.pitch); if by then I.DrawList_AddLine(d,bx,by+1,bx,by+s.row_height-2,T.selected_edge or T.accent,3) end end end end
+  if app.multi_edit_mode then Sources.overlays(app,d,v,mx,my)end
   I.DrawList_PopClipRect(d)
 
   -- The ruler is its own interaction surface: left click seeks, left drag
   -- navigates, and right drag edits REAPER's loop-point selection.
   I.SetCursorScreenPos(c,gx,y0); I.InvisibleButton(c,'##timeline_ruler',positive(v.w),positive(ruler_h),I.ButtonFlags_MouseButtonLeft|I.ButtonFlags_MouseButtonRight)
-  local ruler_hovered=I.IsItemHovered(c) and not phrase_popup_open
+  local ruler_hovered=I.IsItemHovered(c) and not phrase_popup_open and my<y0+22
   if ruler_hovered then
     I.SetMouseCursor(c,(start_hot or end_hot) and I.MouseCursor_ResizeEW or I.MouseCursor_Hand)
     if I.IsMouseClicked(c,I.MouseButton_Left) then
@@ -1595,6 +1662,7 @@ function C.draw(app)
     app.ruler_loop_gesture=nil
   end
 
+  require('src.ui.drum_rows').menu(app,x0,y0,key_w)
   -- Mapping, automation lanes, and folding share the keyboard-header cell.
   I.SetCursorScreenPos(c,x0+3,y0+2)
   local map_x,map_y=I.GetCursorScreenPos(c)
@@ -1605,7 +1673,7 @@ function C.draw(app)
   if map_hot then I.SetTooltip(c,'Key color mapping\nSelect keys, then choose a color. Mapped keys remain visible when folded.') end
   I.SetCursorScreenPos(c,x0+23,y0+2)
   local lane_x,lane_y=I.GetCursorScreenPos(c)
-  if I.InvisibleButton(c,'##automation_lanes',18,18) then s.lane_open=not s.lane_open end
+  if I.InvisibleButton(c,'##automation_lanes',18,18) then if app.expression_editor_open and s.mpe_enabled then require('src.midi_mode').view(app,false,true) else require('src.midi_mode').view(app,app.expression_editor_open,not s.lane_open) end end
   local lane_hot=I.IsItemHovered(c)
   if s.lane_open or lane_hot then I.DrawList_AddRectFilled(map_d,lane_x,lane_y,lane_x+18,lane_y+18,s.lane_open and T.beat or T.panel2,4) end
   for i,h in ipairs({5,11,8}) do local px=lane_x+3+(i-1)*5; I.DrawList_AddLine(map_d,px,lane_y+15,px,lane_y+15-h,s.lane_open and T.accent or T.hint,2) end
@@ -1613,8 +1681,9 @@ function C.draw(app)
   I.SetCursorScreenPos(c,x0+43,y0+2)
   local fold_x,fold_y=I.GetCursorScreenPos(c)
   if I.InvisibleButton(c,'##keyboard_fold',18,18) then
-    s.fold_enabled=not s.fold_enabled
-    s.fold_offset=0
+    if s.scale_view_only then s.scale_view_only=false
+    elseif v.mapped then local Map=require 'src.instrument_map';local map=Map.copy(app.instrument_map);map.enabled=false;local _,notice=Map.save(app,map);app.instrument_map_notice=notice
+    else s.fold_enabled=not s.fold_enabled;s.fold_offset=0 end
   end
   local fold_hot=I.IsItemHovered(c)
   if s.fold_enabled or fold_hot then I.DrawList_AddRectFilled(map_d,fold_x,fold_y,fold_x+18,fold_y+18,s.fold_enabled and T.beat or T.panel2,4) end
@@ -1623,11 +1692,19 @@ function C.draw(app)
   I.DrawList_AddLine(map_d,fold_x+5.5,fold_y+6.5,fold_x+5.5,fold_y+11.5,fold_color,1.5)
   I.DrawList_AddLine(map_d,fold_x+11,fold_y+9,fold_x+16,fold_y+9,fold_color,1.5)
   if I.IsItemHovered(c) then
-    I.SetTooltip(c,s.fold_enabled and 'Show all piano keys' or 'Fold to pitches used in this MIDI item')
+    I.SetTooltip(c,s.scale_view_only and 'Leave scale-only view' or v.mapped and 'Leave mapped drum rows' or s.fold_enabled and 'Show all piano keys' or 'Fold to pitches used in this MIDI item')
   end
 
   I.SetCursorScreenPos(c,gx,gy); I.InvisibleButton(c,'##piano_roll_canvas',positive(v.w),positive(v.h),I.ButtonFlags_MouseButtonLeft|I.ButtonFlags_MouseButtonRight|I.ButtonFlags_MouseButtonMiddle)
+  require('src.ui.harmony_drop').target(app,v)
   local hovered=I.IsItemHovered(c) and not phrase_popup_open; local mods=U.mods(I,c)
+  local navigation_hovered=hovered
+  if app.multi_edit_mode then
+    if require('src.ui.multi_slides').interact(app,v,hovered,mx,my,mods,edge)then hovered=false end
+  elseif require('src.ui.overlap_glide').interact(app,v,hovered,mx,my,mods,edge)then hovered=false end
+  if require('src.ui.expression_direct').grid_interact(app,v,hovered,mx,my,mods)then hovered=false end
+  if not app.multi_edit_mode and not s.mpe_pitch_edit and require('src.ui.slide_targets').interact(app,v,hovered,mx,my,mods)then hovered=false end
+  if not phrase_popup_open and require('src.ui.razor').grid(app,v,d,hovered,mx,my) then hovered=false end
   if hovered and (I.IsMouseClicked(c,I.MouseButton_Left) or I.IsMouseClicked(c,I.MouseButton_Right)) then app.controller_selection_active=false end
   if (hovered and edge) or (app.gesture and app.gesture.kind=='resize') then I.SetMouseCursor(c,I.MouseCursor_ResizeEW)
   elseif hovered and s.mode=='glue' then I.SetMouseCursor(c,I.MouseCursor_Hand) end
@@ -1635,7 +1712,7 @@ function C.draw(app)
     if edge then I.SetTooltip(c,'Drag to resize / '..Mouse.value(s,'unsnap')..': unsnapped resize')
     elseif s.mode=='smart' or s.mode=='paint' or s.mode=='chord' then I.SetTooltip(c,'Drag: move | '..Mouse.value(s,'clone')..'-drag: clone | '..Mouse.value(s,'select')..': select | '..Mouse.value(s,'unsnap')..': bypass snap | Right-click: '..Mouse.value(s,'right_note')) end
   end
-  if hovered then
+  if navigation_hovered and not app.control_wheel_consumed then
     local wheel=I.GetMouseWheel(c)
     if wheel~=0 and not app.gesture then
       if mods.ctrl and mods.shift then if Selection.count(app.selection)>0 then divide_selection(app,wheel>0 and 1 or -1) else v:wheel_scroll(wheel*50,0) end
@@ -1646,9 +1723,13 @@ function C.draw(app)
       else v:wheel_scroll(0,wheel*3) end
     end
   end
-  if hovered and I.IsMouseClicked(c,I.MouseButton_Middle) then app.gesture={kind='pan',mx=mx,my=my,lastx=mx,lasty=my} end
+  if navigation_hovered and I.IsMouseClicked(c,I.MouseButton_Middle) then app.gesture={kind='pan',mx=mx,my=my,lastx=mx,lasty=my} end
   if app.gesture and app.gesture.kind=='pan' and I.IsMouseDown(c,I.MouseButton_Middle) then v:pan(mx-app.gesture.lastx,my-app.gesture.lasty); app.gesture.lastx,app.gesture.lasty=mx,my
   elseif app.gesture and app.gesture.kind=='pan' and I.IsMouseReleased(c,I.MouseButton_Middle) then app.gesture=nil end
+  if app.multi_edit_mode then
+    Sources.interact(app,v,hovered,mx,my,mods,hover,edge,{begin=begin_gesture,update=update_gesture,finish=finish_gesture,stretch=stretch_hot})
+    if app.gesture and app.gesture.kind~='pan' then if auto_scroll(app,v,mx,my)then v:set_geometry(gx,gy,v.w,grid_h,take,source_start,source_end)end end
+  else
   local right_action=Mouse.value(s,'right_note')
   if hovered and I.IsMouseClicked(c,I.MouseButton_Right) and not app.gesture and (not hover or right_action=='Marquee') then
     app.gesture={kind='marquee',x1=mx,y1=my,x2=mx,y2=my,qn1=v:qn_from_x(mx),qn2=v:qn_from_x(mx),pitch1=v:pitch_from_y(my),pitch2=v:pitch_from_y(my),button=I.MouseButton_Right,add=mods.ctrl or mods.shift}
@@ -1672,21 +1753,24 @@ function C.draw(app)
     if auto_scroll(app,v,mx,my) then v:set_geometry(gx,gy,v.w,grid_h,take,app.item_start_qn,app.item_end_qn) end
   end
   if app.gesture and app.gesture.kind=='erase' and I.IsMouseDown(c,I.MouseButton_Right) then
-    local current=hit_note(v,app.cache:visible(v.ppq0,v.ppq1,v.fold and 0 or s.low_pitch,v.fold and 127 or v:high_pitch(),true),mx,my,s.row_height,s.channel or 0)
+    local current=hit_note(v,app.cache:visible(v.ppq0,v.ppq1,v.fold and 0 or s.low_pitch,v.fold and 127 or v:high_pitch(),true),mx,my,s.row_height,edit_channel(s))
     if current and current.id~=app.gesture.last_id then app.edit:delete_indices(take,{current.index}); app.gesture.last_id=current.id; app.cache:rebuild() end
   elseif app.gesture and app.gesture.kind=='erase' and I.IsMouseReleased(c,I.MouseButton_Right) then app.edit:finish(); app.gesture=nil end
   if app.gesture and app.gesture.kind=='mute' and I.IsMouseDown(c,I.MouseButton_Left) then
-    local current=hit_note(v,app.cache:visible(v.ppq0,v.ppq1,v.fold and 0 or s.low_pitch,v.fold and 127 or v:high_pitch(),true),mx,my,s.row_height,s.channel or 0)
+    local current=hit_note(v,app.cache:visible(v.ppq0,v.ppq1,v.fold and 0 or s.low_pitch,v.fold and 127 or v:high_pitch(),true),mx,my,s.row_height,edit_channel(s))
     if current and not app.gesture.visited[current.id] then app.edit:set_muted(take,current.index,app.gesture.target); current.muted=app.gesture.target; app.gesture.visited[current.id]=true end
   elseif app.gesture and app.gesture.kind=='mute' and I.IsMouseReleased(c,I.MouseButton_Left) then app.edit:finish(); app.cache:rebuild(); app.gesture=nil end
   if app.gesture and app.gesture.kind~='pan' and I.IsMouseDown(c,gesture_button) then update_gesture(app,take,v,mx,my,mods)
   elseif app.gesture and app.gesture.kind~='pan' and I.IsMouseReleased(c,gesture_button) then finish_gesture(app,notes) end
+  end
   note_context(app)
   note_properties(app)
 
   -- Piano keys preview the pitch without creating MIDI.
   I.SetCursorScreenPos(c,x0,gy); I.InvisibleButton(c,'##preview_keyboard',positive(key_w),positive(grid_h),I.ButtonFlags_MouseButtonLeft|I.ButtonFlags_MouseButtonRight)
   if I.IsItemHovered(c) and not app.gesture then
+    local pitch=v:pitch_from_y(my);local name=app.note_label and app:note_label(pitch)
+    if name then I.SetTooltip(c,name..'\nMIDI pitch '..pitch..' / channel '..((s.channel or 0)+1))end
     local wheel=I.GetMouseWheel(c)
     if wheel~=0 then if mods.ctrl or mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my) else v:wheel_scroll(0,wheel*3) end end
   end
@@ -1711,7 +1795,7 @@ function C.draw(app)
   elseif I.IsItemActive(c) and not phrase_popup_open and I.IsMouseDown(c,I.MouseButton_Left) and not app.key_mapping_mode then
     local pitch=v:pitch_from_y(my)
     if app.key_preview_pitch~=pitch then
-      if s.mode=='chord' then
+      if s.mode=='chord' and not v.mapped then
         local root=pitch; if s.scale_snap then root=app.music.snap(s.scale_root,s.scale_name,root) end
         app.audition:play_many(chord_pitches(app,root),s.velocity,s.channel)
       else app.audition:play(pitch,s.velocity,s.channel) end
@@ -1719,10 +1803,11 @@ function C.draw(app)
     end
   elseif app.key_preview_pitch and I.IsMouseReleased(c,I.MouseButton_Left) then app.audition:stop(); app.key_preview_pitch=nil end
 
-  local lane_top=gy+grid_h+1
-  local lane_content_h=s.lane_open and (lane_total_h-lane_tools_h) or 0
+  require('src.ui.drum_rows').edit_row(app,v,v:pitch_from_y(my))
+  local lane_top=gy+grid_h+1+articulation_h
+  local lane_content_h=show_controller_lanes and (lane_total_h-lane_tools_h) or 0
   local phrase_y=lane_top+lane_content_h+hbar_h
-  if s.lane_open then
+  if show_controller_lanes then
   local splitter_y=gy+grid_h
   I.DrawList_AddLine(d,gx,splitter_y,gx+v.w,splitter_y,T.scrollbar_thumb,1.5)
   I.SetCursorScreenPos(c,gx,splitter_y-3); I.InvisibleButton(c,'##editor_lane_splitter',positive(v.w),6)
@@ -1731,13 +1816,7 @@ function C.draw(app)
     local bottom=y0+ah-hbar_h-3; s.lane_height=U.clamp(math.floor(bottom-my),lane_min,math.max(lane_min,ah-125))
   end
 
-  local pins={}; local seen_lanes={[s.lane_target]=true}
-  for slot=1,s.lane_refs_expanded and 2 or 0 do
-    local target=s['lane_pin_'..slot]
-    if target and target~='' and target~='none' and not seen_lanes[target] then
-      seen_lanes[target]=true; pins[#pins+1]={slot=slot,target=target}
-    end
-  end
+  local pins=s.lane_stack_enabled and {} or ControllerLanes.references(s)
   local available_for_pins=lane_content_h-40
   local pin_h=#pins>0 and math.min(30,available_for_pins/#pins) or 0
   -- Below 16 px a pinned strip is neither readable nor safely interactive.
@@ -1752,9 +1831,21 @@ function C.draw(app)
     I.DrawList_AddText(d,x0+4,py+math.max(2,(pin_h-14)*.5),T.hint,def.short)
     draw_lane_title(app,d,gx+7,py+math.max(3,(pin_h-14)*.5),'Viewing: '..def.label,gx+v.w)
     I.SetCursorScreenPos(c,x0,py); I.InvisibleButton(c,'##pinned_lane_'..pin.slot,positive(key_w-2),positive(pin_h))
-    if I.IsItemHovered(c) then I.SetTooltip(c,'Reference lane: '..def.label..'\nClick to make this the editable lane.'); if I.IsMouseClicked(c,I.MouseButton_Left) then local old=s.lane_target; s.lane_target=pin.target; s['lane_pin_'..pin.slot]=old end end
+    if I.IsItemHovered(c) then I.SetTooltip(c,'Reference lane: '..def.label..'\nClick to make this the editable lane.'); if I.IsMouseClicked(c,I.MouseButton_Left) then local old=require('src.controller_lanes').identity(s.lane_target,s.cc_number) or 'velocity'; s.lane_target=pin.target; s['lane_pin_'..pin.slot]=old end end
   end
-  local vy=lane_top+pin_space; local lane_h=lane_content_h-pin_space
+  local focused_target=s.lane_target
+  local focused_id=ControllerLanes.identity(s.lane_target,s.cc_number) or 'velocity'
+  app.lane_ranges=app.lane_ranges or {}
+  if s.lane_stack_enabled then app.lane_ranges[focused_id]=app.lane_time_selection end
+  local lane_rows=ControllerLanes.stack(s,lane_content_h-pin_space)
+  local stack_targets=ControllerLanes.targets(s)
+  for _,lane_row in ipairs(lane_rows) do
+  local vy=lane_top+pin_space+lane_row.top; local lane_h=lane_row.height
+  if s.lane_stack_enabled then
+    s.lane_target=lane_row.id
+    app.lane_time_selection=app.lane_ranges[lane_row.id]
+    I.PushID(c,lane_row.id)
+  end
   phrase_y=lane_top+lane_content_h+hbar_h
   I.DrawList_AddRectFilled(d,gx,vy,gx+v.w,vy+lane_h,T.lane_bg or T.row)
   I.DrawList_AddRectFilled(d,x0,vy,gx-1,vy+lane_h,T.panel2)
@@ -1766,7 +1857,7 @@ function C.draw(app)
   for q=lane_first,s.start_qn+s.visible_qn+lane_step,lane_step do local lx=crisp_x(v:x_from_qn(q)); if lx>=gx and lx<=gx+v.w then I.DrawList_AddLine(d,lx,vy,lx,vy+lane_h,T.lane_grid) end end
   draw_lane_meter_lines(app,d,v,vy,lane_h)
   local lane=lane_definition(s)
-  draw_lane_title_right(app,d,vy+5,'Editing: '..lane.label,gx+8,gx+v.w-4)
+  draw_lane_title_right(app,d,vy+5,(not s.lane_stack_enabled or lane_row.id==ControllerLanes.identity(focused_target,s.cc_number)) and ('Editing: '..lane.label) or lane.label,gx+8,gx+v.w-4)
   local velocity_hover,velocity_distance
   if not (lane.cc or lane.pitch or lane.status) and U.contains(mx,my,gx,vy,gx+v.w,vy+lane_h) then velocity_hover,velocity_distance=pick_velocity_handle(app,v,notes,mx,my,vy,lane_h) end
   I.DrawList_PushClipRect(d,gx,vy,gx+v.w,vy+lane_h,true)
@@ -1786,12 +1877,27 @@ function C.draw(app)
       end
     end
   end
-  draw_controller_gesture_value(app,d,lane,app.gesture,mx,my,gx,vy,lane_h,v.w)
+  draw_controller_gesture_value(app,d,lane,(not s.lane_stack_enabled or focused_target==lane_row.id) and app.gesture or nil,mx,my,gx,vy,lane_h,v.w)
   if app.lane_time_selection then local rx1,rx2=v:x_from_qn(app.lane_time_selection.start_qn),v:x_from_qn(app.lane_time_selection.end_qn); I.DrawList_AddRectFilled(d,rx1,vy,rx2,vy+lane_h,T.marquee_fill); I.DrawList_AddLine(d,rx1,vy,rx1,vy+lane_h,T.marquee_edge,2); I.DrawList_AddLine(d,rx2,vy,rx2,vy+lane_h,T.marquee_edge,2) end
   if app.gesture and app.gesture.kind=='cc_marquee' then local g=app.gesture; I.DrawList_AddRectFilled(d,math.min(g.x1,g.x2),vy,math.max(g.x1,g.x2),vy+lane_h,T.marquee_fill); I.DrawList_AddRect(d,math.min(g.x1,g.x2),vy,math.max(g.x1,g.x2),vy+lane_h,T.marquee_edge) end
   I.DrawList_PopClipRect(d)
   I.SetCursorScreenPos(c,gx,vy); I.InvisibleButton(c,'##editor_lane_canvas',positive(v.w),positive(lane_h))
   local lane_hovered=I.IsItemHovered(c) and not phrase_popup_open
+  if app.multi_edit_mode and (not Sources.current_source(app)or Sources.current_source(app).readonly)then lane_hovered=false end
+  local razor_used=false
+  if not phrase_popup_open then
+    if app.multi_edit_mode then razor_used=Sources.controller_razor(app,v,d,lane,vy,lane_h,lane_hovered,mx,my)
+    else razor_used=require('src.ui.controller_razor').draw(app,v,d,lane,vy,lane_h,lane_hovered,mx,my)end
+  end
+  if razor_used then
+    if s.lane_stack_enabled and lane_hovered and I.IsMouseClicked(c,I.MouseButton_Left) then focused_target=lane_row.id end
+    lane_hovered=false
+  end
+  if s.lane_stack_enabled and lane_hovered and (I.IsMouseClicked(c,I.MouseButton_Left) or I.IsMouseClicked(c,I.MouseButton_Right)) and not app.gesture then
+    focused_target=lane_row.id
+    app.controller_selection_active=lane.cc~=nil or lane.pitch or lane.status~=nil
+    app.controller_lane=app.controller_selection_active and lane or nil
+  end
   local lane_closest,lane_dist=nil,math.huge
   if lane_hovered and (lane.cc or lane.pitch or lane.status) then for _,e in ipairs(app.cc_cache:get(false)) do
     if lane_matches_event(lane,e,s.channel) then local value,max_value=lane.pitch and ((e.msg3<<7)|e.msg2) or (lane.status and e.msg2 or e.msg3),lane.pitch and 16383 or 127; local ex,ey=v:x_from_ppq(e.ppq),vy+lane_h-(value/max_value)*(lane_h-7)-3; local distance=(ex-mx)^2+(ey-my)^2; if distance<lane_dist then lane_closest,lane_dist=e,distance end end
@@ -1858,7 +1964,9 @@ function C.draw(app)
         app.edit:begin('ReaRoll: draw '..lane.label,take); app.gesture={kind='cc',cc=lane.cc,pitch=lane.pitch,status=lane.status,switch=lane.switch,discrete=lane.discrete,events=events,last_q=nil,last_value=nil,bottom=vy+lane_h,height=lane_h-5}
       end
     end
-  elseif I.IsItemHovered(c) and I.IsMouseClicked(c,I.MouseButton_Left) and not app.gesture then
+  elseif app.multi_edit_mode then
+    Sources.velocity(app,v,notes,velocity_hover,velocity_distance,lane_hovered,mx,my,vy,lane_h,mods)
+  elseif s.mode~='razor' and I.IsItemHovered(c) and I.IsMouseClicked(c,I.MouseButton_Left) and not app.gesture then
     local closest,dist=pick_velocity_handle(app,v,notes,mx,my,vy,lane_h)
     if closest and dist<=225 and not mods.shift then
       if not Selection.has(app.selection,closest.id) then Selection.set_only(app.selection,closest.id) end
@@ -1871,20 +1979,46 @@ function C.draw(app)
       update_gesture(app,take,v,mx,my,mods)
     end
   end
-  if app.gesture and (app.gesture.kind=='velocity' or app.gesture.kind=='velocity_swipe' or app.gesture.kind=='cc' or app.gesture.kind=='cc_move') and I.IsMouseDown(c,I.MouseButton_Left) then update_gesture(app,take,v,mx,my,mods)
-  elseif app.gesture and (app.gesture.kind=='velocity' or app.gesture.kind=='velocity_swipe' or app.gesture.kind=='cc' or app.gesture.kind=='cc_move') and I.IsMouseReleased(c,I.MouseButton_Left) then finish_gesture(app,notes) end
+  local owns_lane=not s.lane_stack_enabled or focused_target==lane_row.id
+  if owns_lane and app.gesture and (app.gesture.kind=='velocity' or app.gesture.kind=='velocity_swipe' or app.gesture.kind=='cc' or app.gesture.kind=='cc_move') and I.IsMouseDown(c,I.MouseButton_Left) then update_gesture(app,take,v,mx,my,mods)
+  elseif owns_lane and app.gesture and (app.gesture.kind=='velocity' or app.gesture.kind=='velocity_swipe' or app.gesture.kind=='cc' or app.gesture.kind=='cc_move') and I.IsMouseReleased(c,I.MouseButton_Left) then finish_gesture(app,notes) end
 
   I.SetCursorScreenPos(c,x0,vy); I.SetNextItemWidth(c,key_w-2)
   if I.BeginCombo(c,'##editor_target',lane.short) then
+    if s.lane_stack_enabled then focused_target=lane_row.id end
+    if I.MenuItem(c,'Add lane below',nil,false,#ControllerLanes.targets(s)<4)then ControllerLanes.add_below(s,lane_row.id)end
     app.lane_search=app.lane_search or ''
     I.SetNextItemWidth(c,310)
     local search_changed; search_changed,app.lane_search=I.InputText(c,'##lane_search',app.lane_search)
     if I.IsItemHovered(c) then I.SetTooltip(c,'Search by controller name, CC number, velocity, pitch bend, or aftertouch.') end
-    local refs_changed; refs_changed,s.lane_refs_expanded=I.Checkbox(c,'Show reference lanes',s.lane_refs_expanded)
-    if I.IsItemHovered(c) then I.SetTooltip(c,'Show Mod and Expression as additional read-only graphs above the editable lane.') end
+    if not s.lane_stack_enabled then
+      local refs_changed; refs_changed,s.lane_refs_expanded=I.Checkbox(c,'Show reference lanes',s.lane_refs_expanded)
+      if I.IsItemHovered(c) then I.SetTooltip(c,'Show Mod and Expression as additional read-only graphs above the editable lane.') end
+    end
+    if s.lane_stack_enabled then
+      local row_index=1; for index,id in ipairs(stack_targets) do if id==lane_row.id then row_index=index end end
+      for _,action in ipairs({{'Move lane up',-1},{'Move lane down',1}}) do
+        local destination=row_index+action[2]
+        if I.MenuItem(c,action[1],nil,false,destination>=1 and destination<=#stack_targets) then
+          local targets={table.unpack(stack_targets)}
+          targets[row_index],targets[destination]=targets[destination],targets[row_index]
+          ControllerLanes.set_targets(s,targets)
+        end
+      end
+      if I.MenuItem(c,'Remove lane',nil,false,#stack_targets>1) then
+        ControllerLanes.remove(s,lane_row.id);focused_target=s.lane_target
+      end
+      if #lane_rows<#stack_targets then I.TextDisabled(c,'Enlarge the lane section to show the other saved lanes.') end
+    end
     I.Separator(c)
     local function choose(id,label)
-      if I.Selectable(c,label,id==s.lane_target) then s.lane_target=id; local number=id:match('^cc(%d+)$'); if number then s.cc_number=tonumber(number) end end
+      if I.Selectable(c,label,id==s.lane_target) then
+        s.lane_target=id; local number=id:match('^cc(%d+)$'); if number then s.cc_number=tonumber(number) end
+        if s.lane_stack_enabled then
+          local targets={}; for _,target in ipairs(stack_targets) do targets[#targets+1]=target==lane_row.id and id or target end
+          ControllerLanes.set_targets(s,targets); focused_target=id
+        end
+      end
     end
     local function cc_choice(number)
       choose('cc'..number,string.format('CC %03d  %s',number,cc_names[number] or 'Undefined / assignable'))
@@ -1928,11 +2062,28 @@ function C.draw(app)
       local tw=I.CalcTextSize(c,mark[2]); I.DrawList_AddRectFilled(d,label_x-2,mark[1]-1,label_x+tw+2,mark[1]+15,T.panel); I.DrawList_AddText(d,label_x,mark[1],T.hint,mark[2])
     end
   end
+  if s.lane_stack_enabled then
+    app.lane_ranges[lane_row.id]=app.lane_time_selection
+    I.DrawList_AddLine(d,x0,vy+lane_h,gx+v.w,vy+lane_h,T.grid)
+    I.PopID(c)
   end
+  end -- editable lane rows
+  if s.lane_stack_enabled then
+    s.lane_target=focused_target
+    local id=ControllerLanes.identity(focused_target,s.cc_number) or 'velocity'
+    app.lane_time_selection=app.lane_ranges[id]
+    if id~=focused_id then
+      local def=lane_definition(s)
+      app.controller_selection_active=not not (def.cc or def.pitch or def.status)
+      app.controller_lane=app.controller_selection_active and def or nil
+    end
+  end
+  end
+  if app.multi_edit_mode then Sources.controller_context(app)end
   draw_scrollbars(app,d,v,gx,gy,grid_h,lane_top,lane_content_h,hbar_h,vbar_w,mx,my)
-  LaneTools.draw(app,gx,phrase_y,v.w,lane_tools_h)
+  if not app.expression_toolbar_external then LaneTools.draw(app,gx,phrase_y,v.w,lane_tools_h)end
   if app.chord_preview and I.IsMouseReleased(c,I.MouseButton_Left) then app.audition:stop(); app.chord_preview=nil end
-  keyboard_shortcuts(app,take,notes)
+  if not gesture_cancelled and (s.mode~='razor' or app.controller_selection_active and app.razor_focus~='controller') then if not require('src.ui.expression_direct').keys(app)and not (app.multi_edit_mode and require('src.ui.multi_slides').keys(app)or not app.multi_edit_mode and require('src.ui.slide_targets').keys(app))then keyboard_shortcuts(app,take,notes)end end
 end
 
 function C.draw_empty(app,track)
