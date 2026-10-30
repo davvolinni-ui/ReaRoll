@@ -1,13 +1,13 @@
 -- @description ReaRoll - MIDI piano roll
--- @version 0.7.2-test
+-- @version 0.7.3-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Fix Shape Apply staying disabled for valid single-item previews.
---   Keep Shape open if committing a preview fails.
---   Use native ReaImGui modifiers for drawing, selection and keyboard shortcuts.
---   Read physical wheel modifiers only over unfocused ReaRoll on Windows and macOS, when js_ReaScriptAPI is installed.
+--   Fix notes moving upward when clicked or held near the ruler.
+--   Start drag auto-scroll only beyond the note grid after movement toward that edge.
+--   Keep all visible rows and time positions usable without triggering auto-scroll.
+--   Increase scroll speed with distance outside the grid and stop on re-entry.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

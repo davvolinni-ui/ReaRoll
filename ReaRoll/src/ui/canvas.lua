@@ -1388,9 +1388,16 @@ local function auto_scroll(app,v,mx,my)
   -- therefore looks like a permanent drag below the grid and scrolls pitches.
   if not g or g.kind=='pan' or g.kind=='velocity' or g.kind=='velocity_swipe' or g.kind=='cc' or g.kind=='cc_move' or g.kind=='cc_marquee' or g.kind=='slice' then return false end
   local now=reaper.time_precise(); g.scroll_time=g.scroll_time or now; local dt=math.min(.05,now-g.scroll_time); g.scroll_time=now
+  -- A press near an edge is not a request to scroll. Arm each direction only
+  -- after dragging toward it, so a horizontal drag near the ruler stays level.
+  g.scroll_origin_x=g.scroll_origin_x or g.mx or mx
+  g.scroll_origin_y=g.scroll_origin_y or g.my or my
+  local drag_x,drag_y=mx-g.scroll_origin_x,my-g.scroll_origin_y
+  -- Every visible row and time position remains usable. Start scrolling only
+  -- outside the grid, increasing speed over the next 30 pixels.
   local edge=30; local dx,dp=0,0
-  if mx<v.x+edge then dx=-U.clamp((v.x+edge-mx)/edge,0,1) elseif mx>v.x+v.w-edge then dx=U.clamp((mx-(v.x+v.w-edge))/edge,0,1) end
-  if my<v.y+edge then dp=U.clamp((v.y+edge-my)/edge,0,1) elseif my>v.y+v.h-edge then dp=-U.clamp((my-(v.y+v.h-edge))/edge,0,1) end
+  if drag_x<=-3 and mx<v.x then dx=-U.clamp((v.x-mx)/edge,0,1) elseif drag_x>=3 and mx>v.x+v.w then dx=U.clamp((mx-(v.x+v.w))/edge,0,1) end
+  if drag_y<=-3 and my<v.y then dp=U.clamp((v.y-my)/edge,0,1) elseif drag_y>=3 and my>v.y+v.h then dp=-U.clamp((my-(v.y+v.h))/edge,0,1) end
   if dx~=0 then
     local min_start=v.min_qn or app.item_start_qn; local max_start=v.max_start or math.max(min_start,(app.item_end_qn or min_start+app.settings.visible_qn)-app.settings.visible_qn)
     app.settings.start_qn=U.clamp(app.settings.start_qn+dx*app.settings.visible_qn*dt*1.4,min_start,max_start)
