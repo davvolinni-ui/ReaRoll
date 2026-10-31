@@ -1,13 +1,13 @@
 -- @description ReaRoll - MIDI piano roll
--- @version 0.7.3-test
+-- @version 0.7.4-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Fix notes moving upward when clicked or held near the ruler.
---   Start drag auto-scroll only beyond the note grid after movement toward that edge.
---   Keep all visible rows and time positions usable without triggering auto-scroll.
---   Increase scroll speed with distance outside the grid and stop on re-entry.
+--   Handle horizontal wheel input for scrolling and modifier zoom in the note grid.
+--   Support horizontal modifier zoom over piano keys and in the empty roll.
+--   Read physical wheel modifiers on Windows and macOS regardless of focus when js_ReaScriptAPI is installed.
+--   Preserve existing vertical wheel shortcuts and keep physical polling limited to wheel navigation.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

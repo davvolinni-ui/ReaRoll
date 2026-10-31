@@ -1381,6 +1381,60 @@ local function update_gesture(app,take,v,mx,my,mods)
   end
 end
 
+local function wheel_navigation(app,v,mx,my,hover,hovered)
+  if not hovered or app.control_wheel_consumed or app.gesture then return end
+  local I,c=app.ImGui,app.ctx
+  local wheel,horizontal=I.GetMouseWheel(c)
+  horizontal=horizontal or 0
+  if wheel==0 and horizontal==0 then return end
+  local mods=U.wheel_mods(I,c)
+  -- Accept horizontal-only zoom gestures too. Keep vertical input primary
+  -- and preserve Ctrl+Shift's existing note-edit/scroll behavior.
+  if wheel==0 and mods.ctrl and not mods.shift then wheel=horizontal end
+  if wheel~=0 then
+    if mods.ctrl and mods.shift then if Selection.count(app.selection)>0 then divide_selection(app,wheel>0 and 1 or -1) else v:wheel_scroll(wheel*50,0) end
+    elseif mods.alt and not mods.ctrl and hover then adjust_note_property(app,hover,wheel)
+    elseif mods.ctrl and mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my)
+    elseif mods.ctrl then v:wheel_zoom_time(wheel>0 and .82 or 1.22,mx)
+    elseif mods.shift then v:wheel_scroll(wheel*50,0)
+    else v:wheel_scroll(0,wheel*3) end
+  elseif horizontal~=0 then
+    -- macOS Shift-wheel and trackpads can report horizontal input directly.
+    v:wheel_scroll(horizontal*50,0)
+  end
+end
+
+local function keyboard_wheel_navigation(app,v,my)
+  if app.control_wheel_consumed or app.gesture then return end
+  local I,c=app.ImGui,app.ctx
+  local wheel,horizontal=I.GetMouseWheel(c)
+  horizontal=horizontal or 0
+  if wheel==0 and horizontal==0 then return end
+  local mods=U.wheel_mods(I,c)
+  if mods.ctrl or mods.alt then
+    local delta=wheel~=0 and wheel or horizontal
+    v:wheel_zoom_pitch(delta>0 and 1.12 or .89,my)
+  elseif wheel~=0 then v:wheel_scroll(0,wheel*3) end
+end
+
+local function empty_wheel_navigation(app,mx,gx,gw,rows)
+  if app.control_wheel_consumed or app.gesture then return end
+  local I,c,s=app.ImGui,app.ctx,app.settings
+  local wheel,horizontal=I.GetMouseWheel(c)
+  horizontal=horizontal or 0
+  if wheel==0 and horizontal==0 then return end
+  local mods=U.wheel_mods(I,c)
+  if mods.ctrl then
+    local delta=wheel~=0 and wheel or horizontal
+    local ratio=U.clamp((mx-gx)/gw,0,1);local anchor=s.start_qn+ratio*s.visible_qn
+    local wanted=U.clamp(s.visible_qn*(delta>0 and .82 or 1.22),1/16,256)
+    s.start_qn=math.max(0,anchor-ratio*wanted);s.visible_qn=wanted
+  elseif wheel~=0 then
+    if mods.shift then s.start_qn=math.max(0,s.start_qn-wheel*s.visible_qn*.1)
+    else s.low_pitch=U.clamp(s.low_pitch+wheel*3,0,math.max(0,128-rows))end
+  elseif horizontal~=0 then s.start_qn=math.max(0,s.start_qn-horizontal*s.visible_qn*.1)end
+end
+
 local function auto_scroll(app,v,mx,my)
   local g=app.gesture
   -- Controller-lane gestures use the shared timeline viewport, but their Y
@@ -1720,18 +1774,7 @@ function C.draw(app)
     if edge then I.SetTooltip(c,'Drag to resize / '..Mouse.value(s,'unsnap')..': unsnapped resize')
     elseif s.mode=='smart' or s.mode=='paint' or s.mode=='chord' then I.SetTooltip(c,'Drag: move | '..Mouse.value(s,'clone')..'-drag: clone | '..Mouse.value(s,'select')..': select | '..Mouse.value(s,'unsnap')..': bypass snap | Right-click: '..Mouse.value(s,'right_note')) end
   end
-  if navigation_hovered and not app.control_wheel_consumed then
-    local wheel=I.GetMouseWheel(c)
-    if wheel~=0 and not app.gesture then
-      local mods=U.wheel_mods(I,c)
-      if mods.ctrl and mods.shift then if Selection.count(app.selection)>0 then divide_selection(app,wheel>0 and 1 or -1) else v:wheel_scroll(wheel*50,0) end
-      elseif mods.alt and not mods.ctrl and hover then adjust_note_property(app,hover,wheel)
-      elseif mods.ctrl and mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my)
-      elseif mods.ctrl then v:wheel_zoom_time(wheel>0 and .82 or 1.22,mx)
-      elseif mods.shift then v:wheel_scroll(wheel*50,0)
-      else v:wheel_scroll(0,wheel*3) end
-    end
-  end
+  wheel_navigation(app,v,mx,my,hover,navigation_hovered)
   if navigation_hovered and I.IsMouseClicked(c,I.MouseButton_Middle) then app.gesture={kind='pan',mx=mx,my=my,lastx=mx,lasty=my} end
   if app.gesture and app.gesture.kind=='pan' and I.IsMouseDown(c,I.MouseButton_Middle) then v:pan(mx-app.gesture.lastx,my-app.gesture.lasty); app.gesture.lastx,app.gesture.lasty=mx,my
   elseif app.gesture and app.gesture.kind=='pan' and I.IsMouseReleased(c,I.MouseButton_Middle) then app.gesture=nil end
@@ -1780,8 +1823,7 @@ function C.draw(app)
   if I.IsItemHovered(c) and not app.gesture then
     local pitch=v:pitch_from_y(my);local name=app.note_label and app:note_label(pitch)
     if name then I.SetTooltip(c,name..'\nMIDI pitch '..pitch..' / channel '..((s.channel or 0)+1))end
-    local wheel=I.GetMouseWheel(c)
-    if wheel~=0 then local wheel_mods=U.wheel_mods(I,c);if wheel_mods.ctrl or wheel_mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my) else v:wheel_scroll(0,wheel*3) end end
+    keyboard_wheel_navigation(app,v,my)
   end
   if I.IsItemHovered(c) and not phrase_popup_open and app.key_mapping_mode and I.IsMouseClicked(c,I.MouseButton_Left) then
     local pitch=v:pitch_from_y(my); local selected=app.key_map_selection
@@ -2144,14 +2186,8 @@ function C.draw_empty(app,track)
   I.DrawList_AddText(d,gx+12,gy+10,T.hint,'Empty '..track_name..' - click to create a '..bars..'-bar MIDI item')
   I.SetCursorScreenPos(c,gx,gy); I.InvisibleButton(c,'##empty_note_grid',gw,gh,I.ButtonFlags_MouseButtonLeft)
   if I.IsItemHovered(c) then
-    local mx,my=I.GetMousePos(c); local mods=U.mods(I,c); local wheel=I.GetMouseWheel(c)
-    if wheel~=0 then
-      mods=U.wheel_mods(I,c)
-      if mods.ctrl then
-        local anchor=s.start_qn+(mx-gx)/gw*s.visible_qn; local ratio=(mx-gx)/gw; local wanted=U.clamp(s.visible_qn*(wheel>0 and .82 or 1.22),1/16,256); s.start_qn=math.max(0,anchor-ratio*wanted); s.visible_qn=wanted
-      elseif mods.shift then s.start_qn=math.max(0,s.start_qn-wheel*s.visible_qn*.1)
-      else s.low_pitch=U.clamp(s.low_pitch+wheel*3,0,math.max(0,128-rows)) end
-    end
+    local mx,my=I.GetMousePos(c)
+    empty_wheel_navigation(app,mx,gx,gw,rows)
     if I.IsMouseClicked(c,I.MouseButton_Left) then
       local qn=s.start_qn+U.clamp((mx-gx)/gw,0,1)*s.visible_qn
       app:create_empty_item(track,qn)

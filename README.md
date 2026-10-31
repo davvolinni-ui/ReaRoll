@@ -1,22 +1,28 @@
 # ReaRoll
 
-ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.3-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
+ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.4-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
 
 ## Requirements
 
 - REAPER
 - ReaPack
 - ReaImGui 0.10 or newer
-- Optional: js_ReaScriptAPI (install through ReaPack) enables modifier + wheel actions over an unfocused ReaRoll panel on Windows and macOS. Without it, click ReaRoll first to use modified scrolling and zooming.
+- Optional: js_ReaScriptAPI (install through ReaPack) reads physical modifier keys for wheel actions over ReaRoll on Windows and macOS, whether focused or unfocused. Without it, modifiers use ReaImGui's native key state and may require clicking ReaRoll first.
 
 ## Install or update
 
 1. In REAPER, choose **Extensions > ReaPack > Import repositories**.
 2. Import `https://raw.githubusercontent.com/davvolinni-ui/ReaRoll/main/index.xml`.
-3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.3-test** in the package browser.
+3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.4-test** in the package browser.
 4. Close an already running ReaRoll instance, then run **ReaRoll - MIDI piano roll** from the Action List. The action file remains `ReaRoll/ReaRoll.lua`.
 
 Existing preferences are retained. The package also installs **ReaRoll - Reset Window** for recovering a hidden or off-screen window.
+
+## What's new in 0.7.4-test
+
+- Handle horizontal wheel input for scrolling and modifier zoom in the note grid, plus horizontal modifier zoom over piano keys and in the empty roll.
+- Read physical wheel modifiers on Windows and macOS regardless of focus when js_ReaScriptAPI is installed; preserve existing vertical wheel shortcuts.
+- These input-handling changes address ignored horizontal input and incomplete native modifier state. Confirmation against the reported user issue is pending.
 
 ## What's new in 0.7.3-test
 

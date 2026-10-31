@@ -41,7 +41,9 @@ function M.wheel_mods(ImGui,ctx)
   local mods=M.mods(ImGui,ctx)
   local os=reaper.GetOS and reaper.GetOS() or ''
   if not (os:match('^Win') or os:match('^OSX') or os:match('^macOS')) or not reaper.JS_Mouse_GetState then return mods end
-  if not ImGui.IsWindowHovered(ctx) or ImGui.IsWindowFocused(ctx,ImGui.FocusedFlags_AnyWindow or 0) then return mods end
+  if not ImGui.IsWindowHovered(ctx) then return mods end
+  -- Focus does not guarantee complete native key state. For wheel events,
+  -- use the current physical state (including releases), never OR the two.
   local physical=reaper.JS_Mouse_GetState(28)
   -- JS uses gfx.mouse_cap masks: 4 is Ctrl on Windows, Command on macOS;
   -- 8 is Shift and 16 is Alt/Option on both platforms.
