@@ -40,8 +40,8 @@ function M.draw(app)
       {'Navigate',{
         'The scale-rows icon beside Harmony shows only scale notes without altering MIDI. Scale snapping is a separate setting.',
         'Workspace > Show incoming MIDI notes highlights the active track\'s configured input on the keyboard and pitch rows without recording.',
-        'Wheel scrolls pitches. Shift+wheel scrolls time.',
-        'Ctrl+wheel zooms time. Ctrl+Alt+wheel zooms pitch. Middle-drag pans.',
+        'Default: wheel scrolls pitches; Shift+wheel scrolls time. Customize wheel actions in Shortcuts and mouse modifiers.',
+        'Default: Ctrl+wheel zooms time; Ctrl+Alt+wheel zooms pitch (Command/Option on macOS). Middle-drag pans.',
         'The Time/Pitch buttons and Fit actions work without keyboard modifiers.',
       }},
       {'Velocity and controller lanes',{

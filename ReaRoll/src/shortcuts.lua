@@ -1,6 +1,7 @@
 -- @noindex
 local M={}
 local Mouse=require 'src.mouse'
+local Wheel=require 'src.wheel'
 
 M.defaults={
   select_all='Ctrl+A',deselect='Ctrl+D',copy='Ctrl+C',cut='Ctrl+X',paste='Ctrl+V',duplicate='Ctrl+B',
@@ -46,10 +47,12 @@ function M.apply_preset(settings,id)
     settings.shortcuts[action]=binding
   end
   for key,value in pairs(Mouse.defaults) do settings.mouse[key]=preset.mouse[key] or value end
+  Wheel.apply_preset(settings,id)
   settings.input_preset=id
   return true
 end
 function M.load(settings)
+  Wheel.load(settings)
   settings.shortcuts={}; local schema=tonumber(reaper.GetExtState('ReaRoll','shortcut_schema')) or 0
   for action,default in pairs(M.defaults) do
     local value=reaper.GetExtState('ReaRoll','shortcut_'..action)
@@ -66,6 +69,7 @@ function M.load(settings)
   if id=='' and schema<2 then settings.input_preset='default' end
 end
 function M.save(settings)
+  Wheel.save(settings)
   reaper.SetExtState('ReaRoll','shortcut_schema','2',true)
   for action,default in pairs(M.defaults) do reaper.SetExtState('ReaRoll','shortcut_'..action,settings.shortcuts[action] or default,true) end
   for key in pairs(Mouse.defaults) do reaper.SetExtState('ReaRoll','mouse_'..key,Mouse.value(settings,key),true) end

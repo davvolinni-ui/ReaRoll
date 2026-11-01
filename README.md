@@ -1,6 +1,6 @@
 # ReaRoll
 
-ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.4-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
+ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.5-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
 
 ## Requirements
 
@@ -13,10 +13,18 @@ ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.4-test** expands note ed
 
 1. In REAPER, choose **Extensions > ReaPack > Import repositories**.
 2. Import `https://raw.githubusercontent.com/davvolinni-ui/ReaRoll/main/index.xml`.
-3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.4-test** in the package browser.
+3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.5-test** in the package browser.
 4. Close an already running ReaRoll instance, then run **ReaRoll - MIDI piano roll** from the Action List. The action file remains `ReaRoll/ReaRoll.lua`.
 
 Existing preferences are retained. The package also installs **ReaRoll - Reset Window** for recovering a hidden or off-screen window.
+
+## What's new in 0.7.5-test
+
+- Customize wheel scrolling, zoom, note values and divisions, including direction reversal and horizontal wheel / trackpad input.
+- See the four REAPER navigation gestures and Shift + wheel together in the main settings.
+- Select the REAPER preset to apply its default wheel navigation over notes and the empty roll.
+- Display Command and Option on macOS. Existing custom bindings are preserved until you select a preset.
+- Automated Windows/macOS input checks pass; live macOS verification is pending.
 
 ## What's new in 0.7.4-test
 
@@ -68,6 +76,8 @@ ReaRoll's pitch-bend range must match the instrument. It does not automatically 
 Open **the three-dot menu > Shortcuts and mouse modifiers** to choose **ReaRoll Default**, **REAPER**, **FL Studio**, or **Ableton Live**. Applying a preset replaces keyboard and note-grid mouse bindings; individual edits become **Custom**. Existing saved shortcuts are preserved until you choose a preset.
 
 Presets adapt familiar Windows controls to supported ReaRoll actions. See [input preset details](docs/INPUT_PRESETS.md).
+
+Mouse wheel actions are customizable under **Shortcuts and mouse modifiers > Mouse wheel and zoom**. The main view shows Wheel, Ctrl/Command + wheel, Alt/Option + wheel, Ctrl/Command + Alt/Option + wheel, and Shift + wheel, with a Reverse option for each. **Advanced wheel settings** contains additional combinations, horizontal wheel / trackpad input, piano keys, and the empty roll. On macOS the dialog displays Command and Option; Windows displays Ctrl and Alt. Changes save when ReaRoll closes. Selecting **REAPER** applies its four main wheel bindings over notes and the empty roll: wheel zooms horizontally, Ctrl/Command + wheel zooms vertically, Alt/Option + wheel scrolls horizontally, and Ctrl/Command + Alt/Option + wheel scrolls vertically. Modifier bindings also apply to horizontal input. **ReaRoll Default** resets all wheel settings; FL Studio and Ableton Live preserve them. Existing saved settings are kept until you explicitly apply a preset. **Reset wheel settings** restores the wheel defaults. Keyboard zoom and Fit shortcuts appear below.
 
 ## Feedback and license
 

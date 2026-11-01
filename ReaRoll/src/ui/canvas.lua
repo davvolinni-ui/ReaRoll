@@ -6,6 +6,7 @@ local Grid=require 'src.grid'
 local Take=require 'src.take'
 local Shortcuts=require 'src.shortcuts'
 local Mouse=require 'src.mouse'
+local Wheel=require 'src.wheel'
 local ControllerLanes=require 'src.controller_lanes'
 local Sources=require 'src.ui.editable_sources'
 local function edit_channel(s)if s.edit_all_channels==false then return s.channel or 0 end end
@@ -1388,20 +1389,15 @@ local function wheel_navigation(app,v,mx,my,hover,hovered)
   horizontal=horizontal or 0
   if wheel==0 and horizontal==0 then return end
   local mods=U.wheel_mods(I,c)
-  -- Accept horizontal-only zoom gestures too. Keep vertical input primary
-  -- and preserve Ctrl+Shift's existing note-edit/scroll behavior.
-  if wheel==0 and mods.ctrl and not mods.shift then wheel=horizontal end
-  if wheel~=0 then
-    if mods.ctrl and mods.shift then if Selection.count(app.selection)>0 then divide_selection(app,wheel>0 and 1 or -1) else v:wheel_scroll(wheel*50,0) end
-    elseif mods.alt and not mods.ctrl and hover then adjust_note_property(app,hover,wheel)
-    elseif mods.ctrl and mods.alt then v:wheel_zoom_pitch(wheel>0 and 1.12 or .89,my)
-    elseif mods.ctrl then v:wheel_zoom_time(wheel>0 and .82 or 1.22,mx)
-    elseif mods.shift then v:wheel_scroll(wheel*50,0)
-    else v:wheel_scroll(0,wheel*3) end
-  elseif horizontal~=0 then
-    -- macOS Shift-wheel and trackpads can report horizontal input directly.
-    v:wheel_scroll(horizontal*50,0)
-  end
+  local action,delta=Wheel.resolve(app.settings,'grid',mods,wheel,horizontal)
+  if action=='Divide selection' then
+    if Selection.count(app.selection)>0 then divide_selection(app,delta>0 and 1 or -1) else v:wheel_scroll(delta*50,0) end
+  elseif action=='Adjust note property' then
+    if hover then adjust_note_property(app,hover,delta) elseif mods.shift then v:wheel_scroll(delta*50,0) else v:wheel_scroll(0,delta*3) end
+  elseif action=='Zoom pitch' then v:wheel_zoom_pitch(delta>0 and 1.12 or .89,my)
+  elseif action=='Zoom time' then v:wheel_zoom_time(delta>0 and .82 or 1.22,mx)
+  elseif action=='Scroll time' then v:wheel_scroll(delta*50,0)
+  elseif action=='Scroll pitches' then v:wheel_scroll(0,delta*3) end
 end
 
 local function keyboard_wheel_navigation(app,v,my)
@@ -1410,11 +1406,11 @@ local function keyboard_wheel_navigation(app,v,my)
   local wheel,horizontal=I.GetMouseWheel(c)
   horizontal=horizontal or 0
   if wheel==0 and horizontal==0 then return end
-  local mods=U.wheel_mods(I,c)
-  if mods.ctrl or mods.alt then
-    local delta=wheel~=0 and wheel or horizontal
-    v:wheel_zoom_pitch(delta>0 and 1.12 or .89,my)
-  elseif wheel~=0 then v:wheel_scroll(0,wheel*3) end
+  local action,delta=Wheel.resolve(app.settings,'keys',U.wheel_mods(I,c),wheel,horizontal)
+  if action=='Zoom pitch' then v:wheel_zoom_pitch(delta>0 and 1.12 or .89,my)
+  elseif action=='Zoom time' then v:wheel_zoom_time(delta>0 and .82 or 1.22,v.x+v.w*.5)
+  elseif action=='Scroll time' then v:wheel_scroll(delta*50,0)
+  elseif action=='Scroll pitches' then v:wheel_scroll(0,delta*3) end
 end
 
 local function empty_wheel_navigation(app,mx,gx,gw,rows)
@@ -1423,16 +1419,14 @@ local function empty_wheel_navigation(app,mx,gx,gw,rows)
   local wheel,horizontal=I.GetMouseWheel(c)
   horizontal=horizontal or 0
   if wheel==0 and horizontal==0 then return end
-  local mods=U.wheel_mods(I,c)
-  if mods.ctrl then
-    local delta=wheel~=0 and wheel or horizontal
+  local action,delta=Wheel.resolve(s,'empty',U.wheel_mods(I,c),wheel,horizontal)
+  if action=='Zoom time' then
     local ratio=U.clamp((mx-gx)/gw,0,1);local anchor=s.start_qn+ratio*s.visible_qn
     local wanted=U.clamp(s.visible_qn*(delta>0 and .82 or 1.22),1/16,256)
     s.start_qn=math.max(0,anchor-ratio*wanted);s.visible_qn=wanted
-  elseif wheel~=0 then
-    if mods.shift then s.start_qn=math.max(0,s.start_qn-wheel*s.visible_qn*.1)
-    else s.low_pitch=U.clamp(s.low_pitch+wheel*3,0,math.max(0,128-rows))end
-  elseif horizontal~=0 then s.start_qn=math.max(0,s.start_qn-horizontal*s.visible_qn*.1)end
+  elseif action=='Zoom pitch' then s.row_height=U.clamp(s.row_height*(delta>0 and 1.12 or .89),8,32)
+  elseif action=='Scroll time' then s.start_qn=math.max(0,s.start_qn-delta*s.visible_qn*.1)
+  elseif action=='Scroll pitches' then s.low_pitch=U.clamp(s.low_pitch+delta*3,0,math.max(0,128-rows)) end
 end
 
 local function auto_scroll(app,v,mx,my)

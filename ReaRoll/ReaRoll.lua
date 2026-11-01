@@ -1,13 +1,13 @@
 -- @description ReaRoll - MIDI piano roll
--- @version 0.7.4-test
+-- @version 0.7.5-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Handle horizontal wheel input for scrolling and modifier zoom in the note grid.
---   Support horizontal modifier zoom over piano keys and in the empty roll.
---   Read physical wheel modifiers on Windows and macOS regardless of focus when js_ReaScriptAPI is installed.
---   Preserve existing vertical wheel shortcuts and keep physical polling limited to wheel navigation.
+--   Customize wheel scrolling, zoom, note values and divisions for each modifier combination and wheel axis.
+--   Show the four REAPER navigation gestures and Shift-wheel together, with per-binding direction reversal.
+--   Apply REAPER's default wheel navigation when selecting the REAPER input preset.
+--   Display Command and Option labels on macOS; preserve saved custom bindings until a preset is selected.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua
