@@ -38,9 +38,19 @@ end
 -- Call only while handling a wheel event over ReaRoll. Do not change focus
 -- or replace the modifier state used by clicks, gestures or shortcuts.
 function M.wheel_mods(ImGui,ctx)
-  local mods=M.mods(ImGui,ctx)
   local os=reaper.GetOS and reaper.GetOS() or ''
-  if not (os:match('^Win') or os:match('^OSX') or os:match('^macOS')) or not reaper.JS_Mouse_GetState then return mods end
+  local mac=os:match('^OSX') or os:match('^macOS')
+  local mods=M.mods(ImGui,ctx)
+  if mac and ImGui.GetConfigVar and ImGui.ConfigVar_MacOSXBehaviors and ImGui.Mod_Super then
+    -- ReaImGui 0.10 reports Command as Mod_Ctrl only when MacOSXBehaviors
+    -- is enabled. With it disabled Command is Mod_Super (physical Ctrl
+    -- remains Mod_Ctrl). Select one flag, never merge the two keys.
+    local behavior=ImGui.GetConfigVar(ctx,ImGui.ConfigVar_MacOSXBehaviors)
+    if behavior==0 or behavior==false then
+      mods.ctrl=(ImGui.GetKeyMods(ctx)&ImGui.Mod_Super)~=0
+    end
+  end
+  if not (os:match('^Win') or mac) or not reaper.JS_Mouse_GetState then return mods end
   if not ImGui.IsWindowHovered(ctx) then return mods end
   -- Focus does not guarantee complete native key state. For wheel events,
   -- use the current physical state (including releases), never OR the two.
@@ -49,4 +59,5 @@ function M.wheel_mods(ImGui,ctx)
   -- 8 is Shift and 16 is Alt/Option on both platforms.
   return {ctrl=(physical&4)~=0,shift=(physical&8)~=0,alt=(physical&16)~=0}
 end
+
 return M

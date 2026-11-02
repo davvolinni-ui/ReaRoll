@@ -1,13 +1,14 @@
 -- @description ReaRoll - MIDI piano roll
--- @version 0.7.5-test
+-- @version 0.7.6-test
 -- @author Davvo
 -- @link https://forum.cockos.com/showthread.php?t=311021
 -- @about Testing release. Requires ReaImGui 0.10. See EULA.md before use.
 -- @changelog
---   Customize wheel scrolling, zoom, note values and divisions for each modifier combination and wheel axis.
---   Show the four REAPER navigation gestures and Shift-wheel together, with per-binding direction reversal.
---   Apply REAPER's default wheel navigation when selecting the REAPER input preset.
---   Display Command and Option labels on macOS; preserve saved custom bindings until a preset is selected.
+--   Add Straight, Triplet and Dotted grid divisions through 1/128, including Auto grid.
+--   Combine grid, rhythm and note length in one compact toolbar control with wheel support.
+--   Keep Follow grid, Fixed and Learn from notes directly accessible; shorten fixed-length choices.
+--   Fix beat/bar lines and shading splitting dotted or coarse grid cells when zoomed out.
+--   Fix native macOS Command-wheel detection when key swapping is disabled; live Mac confirmation remains pending.
 -- @provides
 --   src/*.lua
 --   src/ui/*.lua

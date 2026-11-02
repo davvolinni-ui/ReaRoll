@@ -4,16 +4,16 @@ local U=require 'src.util'
 local M={}
 local Icons=require 'src.ui.icons'
 local Controls=require 'src.ui.controls'
-local Grid=require 'src.grid'
+local GridControls=require 'src.ui.grid_controls'
 local Harmony=require 'src.ui.harmony'
 local Workspace=require 'src.ui.workspace'
-local grids={{'1/4',1},{'1/8',.5},{'1/16',.25},{'1/32',.125},{'1/16T',1/6}}
+
 
 local function main_menu(app)
   local I,c,s=app.ImGui,app.ctx,app.settings
   if Icons.button(app,'main_menu','more','Menu and Setup') then I.OpenPopup(c,'##main_menu') end
   if I.BeginPopup(c,'##main_menu') then
-    I.TextDisabled(c,'ReaRoll 0.7.0-test'); I.Separator(c)
+    I.TextDisabled(c,'ReaRoll 0.7.6-test'); I.Separator(c)
     if I.MenuItem(c,'Quick guide...') then app.help_open=true end
     Workspace.menu(app)
     if I.MenuItem(c,'Mouse tooltips',nil,s.tooltips_enabled~=false)then s.tooltips_enabled=s.tooltips_enabled==false end
@@ -54,7 +54,7 @@ function M.draw(app)
   slot() -- Item scope.
   for _=1,7 do slot()end -- Note tools.
   slot(nil,8*z);slot();slot() -- Chords and scale.
-  slot(nil,8*z);slot(66*z);slot(90*z) -- Snap, grid, insert length.
+  slot(nil,8*z);slot(GridControls.width*z) -- Snap and combined grid/rhythm/length control.
   slot(54*z,8*z);slot();slot(75*z) -- Velocity, audition, channel.
   slot(text_width('Fit'),8*z);slot(text_width('Sel'));slot() -- Navigation.
   if s.prevent_overlaps and overlap_count>0 then slot(text_width('Fix overlaps ('..tostring(overlap_count)..')'))end
@@ -120,29 +120,7 @@ function M.draw(app)
   local snap_clicked,snap_hot=Icons.button(app,'snap',snap_icon,'Snap: '..snap_names[snap_mode]..'\nClick: cycle Off / Absolute / Relative\nRight-click: Absolute',snap_mode~='off')
   if snap_clicked then snap_mode=snap_mode=='off' and 'absolute' or snap_mode=='absolute' and 'relative' or 'off'; s.snap_mode=snap_mode; s.snap_enabled=snap_mode~='off' end
   if snap_hot and I.IsMouseClicked(c,I.MouseButton_Right) then s.snap_mode='absolute'; s.snap_enabled=true end
-  same_line(66); I.SetNextItemWidth(c,66*z)
-  local grid=s.adaptive_grid and 'Auto' or 'Grid'; if not s.adaptive_grid then for _,g in ipairs(grids) do if math.abs(g[2]-s.grid_qn)<.0001 then grid=g[1] end end end
-  if I.BeginCombo(c,'##toolbar_grid_combo',grid) then
-    if I.Selectable(c,'Adaptive',s.adaptive_grid) then s.adaptive_grid=true end
-    for _,g in ipairs(grids) do if I.Selectable(c,g[1],not s.adaptive_grid and math.abs(g[2]-s.grid_qn)<.0001) then s.adaptive_grid=false; s.grid_qn=g[2] end end
-    I.EndCombo(c)
-  end
-  if Controls.choice(app,s,'grid_qn',.25,{.125,1/6,.25,.5,1},'Grid (quarter notes)') then s.adaptive_grid=false end
-  same_line(90); I.SetNextItemWidth(c,90*z)
-  local current_length=Grid.note_length(s)
-  local length_label=s.mode=='paint' and 'Grid' or (s.length_follow_grid and 'Grid' or string.format('%.3g QN',current_length))
-  if s.mode~='paint' and not s.length_follow_grid then for _,g in ipairs({{'1 bar',4},{'1/2',2},{'1/4',1},{'1/8',.5},{'1/16',.25},{'1/32',.125}}) do if math.abs(current_length-g[2])<.00001 then length_label=g[1] end end end
-  if I.BeginCombo(c,'##insert_length','Len '..length_label) then
-    if I.Selectable(c,'Follow grid',s.length_follow_grid) then s.length_follow_grid=true; s.inherit_length=false end
-    for _,g in ipairs({{'1 bar (4 QN)',4},{'1/2',2},{'1/4',1},{'1/8',.5},{'1/16',.25},{'1/32',.125},{'1/16 triplet',1/6}}) do
-      if I.Selectable(c,g[1],not s.length_follow_grid and math.abs(s.length_qn-g[2])<.00001) then s.length_qn=g[2]; s.length_follow_grid=false; s.inherit_length=false end
-    end
-    local changed; changed,s.inherit_length=I.Checkbox(c,'Learn length from clicked notes',s.inherit_length)
-    Controls.toggle(app,s,'inherit_length',true,'Learn note length')
-    I.EndCombo(c)
-  end
-  if I.IsItemHovered(c) then I.SetTooltip(c,'Length for Smart and Chord notes. Follow grid tracks fixed or adaptive grid changes.\nPaint always creates one grid-cell note per step.') end
-  if s.mode~='paint' and Controls.choice(app,s,'length_qn',.25,{.125,1/6,.25,.5,1,2,4},'Insert length (quarter notes)') then s.length_follow_grid=false; s.inherit_length=false end
+  same_line(GridControls.width);GridControls.draw(app,z)
   group_gap(); I.SetNextItemWidth(c,54*z); local changed
   changed,s.velocity=I.DragInt(c,'##toolbar_velocity',s.velocity,1,1,127,'V %d')
   Controls.number(app,s,'velocity',100,1,1,127,'Insert velocity')

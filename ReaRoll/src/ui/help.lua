@@ -10,6 +10,7 @@ function M.draw(app)
     I.TextColored(c,app.theme.note,'ReaRoll editing guide'); I.Separator(c)
     local sections={
       {'Create and edit',{
+        'Open the combined grid control beside Snap for Auto or 1/1 to 1/128, Straight / Triplet / Dotted, and note length (Follow grid / Fixed / Learn from notes). Fixed length separates size and rhythm. Wheel over the rhythm choices to cycle them. Auto keeps the rhythm as you zoom; grid lines, snapping and Follow grid note lengths share that spacing.',
         'Cancel (Escape by default) during a note or controller edit drag restores the MIDI from before the gesture.',
         Mouse.value(app.settings,'empty')=='Marquee' and 'Smart: drag empty grid to select; double-click empty grid to insert. Paint draws directly.' or 'Smart: click empty grid to insert; drag while inserting to choose its end.',
         'Drag a note body to move it. Drag either edge to resize it.',

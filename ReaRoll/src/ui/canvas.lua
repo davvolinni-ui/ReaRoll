@@ -418,8 +418,8 @@ local function draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
   require('src.ui.piano_keys').draw(app,d,v,x0,key_w,white_keys,black_keys,hover_pitch)
   -- Keep the visual grid useful at every zoom level without changing the
   -- user's actual snap resolution. Dense divisions progressively coalesce.
-  local visual_grid=s.grid_qn
-  while visual_grid*v.px_per_qn<8 and visual_grid<4 do visual_grid=visual_grid*2 end
+  Grid.update(app,v.px_per_qn)
+  local visual_grid=Grid.visual_step(s.grid_qn,v.px_per_qn)
   -- Ask REAPER for actual measure boundaries so time-signature changes and
   -- project offsets do not produce misleading ruler numbers.
   local finish=s.start_qn+s.visible_qn; local measure,bar_qn,bar_end=reaper.TimeMap_QNToMeasures(0,s.start_qn)
@@ -429,12 +429,21 @@ local function draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
     local _,denom=reaper.TimeMap_GetTimeSigAtTime(0,reaper.TimeMap2_QNToTime(0,bar_qn)); local beat_step=4/(denom or 4)
     local beat_number=0
     for q=bar_qn,bar_end-beat_step*.25,beat_step do
-      if beat_number%2==1 then local left,right=math.max(v.x,v:x_from_qn(q)),math.min(v.x+v.w,v:x_from_qn(math.min(bar_end,q+beat_step))); if right>left then I.DrawList_AddRectFilled(d,left,v.y,right,v.y+v.h,T.beat_shade) end end
+      local beat_end=math.min(bar_end,q+beat_step)
+      if beat_number%2==1 and Grid.on_line(q,visual_grid) and Grid.on_line(beat_end,visual_grid) then
+        local left,right=math.max(v.x,v:x_from_qn(q)),math.min(v.x+v.w,v:x_from_qn(beat_end))
+        if right>left then I.DrawList_AddRectFilled(d,left,v.y,right,v.y+v.h,T.beat_shade) end
+      end
       beat_number=beat_number+1
     end
-    if x>=v.x-1 and x<=v.x+v.w then I.DrawList_AddLine(d,x,y0,x,v.y+v.h,T.bar,1.6); I.DrawList_AddText(d,x+7,y0+3,T.ruler_text,displayed_measure(bar_qn,measure)) end
+    if x>=v.x-1 and x<=v.x+v.w then
+      -- Dotted/coarse grids can cross a bar boundary inside a cell. Keep the
+      -- bar marker in the ruler instead of splitting that cell in the roll.
+      I.DrawList_AddLine(d,x,y0,x,Grid.on_line(bar_qn,visual_grid) and v.y+v.h or v.y,T.bar,1.6)
+      I.DrawList_AddText(d,x+7,y0+3,T.ruler_text,displayed_measure(bar_qn,measure))
+    end
     if visual_grid*v.px_per_qn>=8 then
-      for q=bar_qn+visual_grid,bar_end-.000001,visual_grid do
+      for q=(math.floor(bar_qn/visual_grid)+1)*visual_grid,bar_end-.000001,visual_grid do
         local beat_index=(q-bar_qn)/beat_step
         if math.abs(beat_index-math.floor(beat_index+.5))>.00001 then
           local sx=crisp_x(v:x_from_qn(q))
@@ -443,7 +452,12 @@ local function draw_background(app,d,v,x0,y0,key_w,ruler_h,grid_h,hover_pitch)
       end
     end
     if beat_step*v.px_per_qn>=10 then
-      for q=bar_qn+beat_step,bar_end-beat_step*.25,beat_step do local bx=crisp_x(v:x_from_qn(q)); if bx>=v.x and bx<=v.x+v.w then I.DrawList_AddLine(d,bx,y0,bx,v.y+v.h,T.beat) end end
+      for q=bar_qn+beat_step,bar_end-beat_step*.25,beat_step do local bx=crisp_x(v:x_from_qn(q)); if bx>=v.x and bx<=v.x+v.w then
+        local on_grid=Grid.on_line(q,visual_grid)
+        -- Straight ruler beats must not introduce extra columns between
+        -- triplet/dotted divisions, especially with coarse adaptive grids.
+        I.DrawList_AddLine(d,bx,y0,bx,on_grid and v.y+v.h or v.y,T.beat)
+      end end
     end
     local next_measure,next_start,next_end=reaper.TimeMap_QNToMeasures(0,bar_end+.000001)
     if next_start<=bar_qn then break end
@@ -2170,7 +2184,8 @@ function C.draw_empty(app,track)
     I.DrawList_AddLine(d,x0+1,top_y+1,right_x-2,top_y+1,T.black_key_top,1)
     I.DrawList_AddRect(d,x0,top_y,right_x,bottom_y,T.key_border,2,corners,1)
   end
-  local step=math.max(s.grid_qn or .25,1/16); local first=math.floor(s.start_qn/step)*step
+  Grid.update(app,gw/s.visible_qn)
+  local step=Grid.visual_step(s.grid_qn or .25,gw/s.visible_qn); local first=math.floor(s.start_qn/step)*step
   for q=first,s.start_qn+s.visible_qn+step,step do
     local x=gx+(q-s.start_qn)/s.visible_qn*gw
     if x>=gx and x<=gx+gw then I.DrawList_AddLine(d,x,gy,x,gy+gh,(math.abs(q-math.floor(q+.5))<.00001) and T.beat or T.grid_soft) end

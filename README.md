@@ -1,6 +1,6 @@
 # ReaRoll
 
-ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.5-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
+ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.6-test** expands note editing, chords, controller editing, glides and MPE while keeping the familiar piano roll and bottom tools. This is a release for user testing.
 
 ## Requirements
 
@@ -13,10 +13,18 @@ ReaRoll is a MIDI piano roll for REAPER by Davvo. **0.7.5-test** expands note ed
 
 1. In REAPER, choose **Extensions > ReaPack > Import repositories**.
 2. Import `https://raw.githubusercontent.com/davvolinni-ui/ReaRoll/main/index.xml`.
-3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.5-test** in the package browser.
+3. Synchronize packages, then install or update **ReaRoll**. If the testing version is not offered, enable pre-releases for this package or select **0.7.6-test** in the package browser.
 4. Close an already running ReaRoll instance, then run **ReaRoll - MIDI piano roll** from the Action List. The action file remains `ReaRoll/ReaRoll.lua`.
 
 Existing preferences are retained. The package also installs **ReaRoll - Reset Window** for recovering a hidden or off-screen window.
+
+## What's new in 0.7.6-test
+
+- Straight, Triplet and Dotted grids from whole notes through 1/128 notes. Auto grid keeps your selected rhythm as you zoom.
+- One compact toolbar control for grid, rhythm and note length. T means Triplet; D means Dotted. Rhythm choices support the mouse wheel.
+- Follow grid, Fixed and Learn from notes are directly visible. Fixed length uses a short size list and separate rhythm choices.
+- Fix beat/bar lines and shading splitting dotted or coarse grid cells. Off-grid markers stay in the ruler, with grid lines and snapping aligned below.
+- Fix native Command-wheel detection when ReaImGui's macOS key swapping is disabled. Confirmation against the Mac user's specific issue remains pending.
 
 ## What's new in 0.7.5-test
 
